@@ -1,25 +1,50 @@
-import telebot
+import time
+from telegram import Bot, Update
+from telegram.error import TelegramError
 
-# Initialize the bot with your token
-bot = telebot.TeleBot("6015175658:AAH1ZQkPHCQwcgem4Szo0LNF5Gqred97kps")
+# Telegram bot token
+BOT_TOKEN = '6015175658:AAH1ZQkPHCQwcgem4Szo0LNF5Gqred97kps'
 
-# Set up GPIO
-# Add any GPIO setup you need here
+# Initialize the bot
+bot = Bot(token=BOT_TOKEN)
 
-@bot.message_handler(commands=['start', 'help'])
-def send_welcome(message):
-    bot.reply_to(message, "Welcome! I'm your Raspberry Pi Telegram bot.")
+# Function to handle incoming messages
+def handle(update: Update) -> None:
+    try:
+        message = update.message
+        chat_id = message.chat.id
+        command = message.text
 
-@bot.message_handler(commands=['startRaspi'])
-def start_raspi(message):
-    bot.reply_to(message, "Raspberry Pi is starting up!")
-    # Add your Raspberry Pi startup code here
-    # For example:
-    # os.system("sudo systemctl start your_service.service")
+        print(f'Received command: {command}')
 
-@bot.message_handler(func=lambda message: True)
-def echo_all(message):
-    bot.reply_to(message, "You said: " + message.text)
+        # Example: Respond to '/startRaspi' command
+        if command == '/startRaspi':
+            bot.send_message(chat_id=chat_id, text='Hello! I am your Raspberry Pi bot.')
+        # Add more commands as needed
 
-# Start the bot
-bot.polling()
+    except TelegramError as e:
+        print(f"TelegramError: {e}")
+
+def main():
+    offset = None
+
+    while True:
+        try:
+            # Get updates from the bot
+            updates = bot.get_updates(offset=offset, timeout=10)
+
+            for update in updates:
+                # Update offset to get the next batch of updates
+                offset = update.update_id + 1
+
+                handle(update)
+
+        except TelegramError as e:
+            print(f"TelegramError: {e}")
+            time.sleep(10)  # Wait before retrying
+        except Exception as e:
+            print(f"Error: {e}")
+            time.sleep(10)  # Wait before retrying
+
+if __name__ == '__main__':
+    main()
