@@ -1,41 +1,25 @@
-from telegram import Update, Bot
-from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, CallbackContext
+import telebot
 
-# Telegram bot token
-BOT_TOKEN = '6015175658:AAH1ZQkPHCQwcgem4Szo0LNF5Gqred97kps'
+# Initialize the bot with your token
+bot = telebot.TeleBot("6015175658:AAH1ZQkPHCQwcgem4Szo0LNF5Gqred97kps")
 
-# Function to handle the /startRaspi command
-def start_raspi(update: Update, context: CallbackContext) -> None:
-    update.message.reply_text('Hello! I am your Raspberry Pi bot.')
+# Set up GPIO
+# Add any GPIO setup you need here
 
-# Function to handle other text messages
-def handle_message(update: Update, context: CallbackContext) -> None:
-    command = update.message.text
-    print('Received command:', command)
+@bot.message_handler(commands=['start', 'help'])
+def send_welcome(message):
+    bot.reply_to(message, "Welcome! I'm your Raspberry Pi Telegram bot.")
 
-    # Example: Respond to '/startRaspi' command (already handled by start_raspi)
-    if command == '/startRaspi':
-        start_raspi(update, context)
-    
-    # Add more commands as needed
+@bot.message_handler(commands=['startRaspi'])
+def start_raspi(message):
+    bot.reply_to(message, "Raspberry Pi is starting up!")
+    # Add your Raspberry Pi startup code here
+    # For example:
+    # os.system("sudo systemctl start your_service.service")
 
-def main():
-    # Initialize the bot and updater
-    updater = Updater(BOT_TOKEN)
-    dispatcher = updater.dispatcher
+@bot.message_handler(func=lambda message: True)
+def echo_all(message):
+    bot.reply_to(message, "You said: " + message.text)
 
-    # Add command handler for /startRaspi
-    dispatcher.add_handler(CommandHandler('startRaspi', start_raspi))
-
-    # Add a message handler for other text messages
-    dispatcher.add_handler(MessageHandler(Filters.text & ~Filters.command, handle_message))
-
-    # Start the bot
-    updater.start_polling()
-    print('Listening...')
-
-    # Run the bot until you press Ctrl-C
-    updater.idle()
-
-if __name__ == '__main__':
-    main()
+# Start the bot
+bot.polling()
