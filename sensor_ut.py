@@ -20,7 +20,7 @@ def main():
                 distance_cm = sensor.distance * 100
                 print(f"Measured Distance: {distance_cm:.2f} cm")
 
-                if distance_cm < max_distance:
+                if distance_cm > max_distance:
                     print("Break in!")
 
             except RuntimeError:

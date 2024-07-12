@@ -1,43 +1,41 @@
-import telepot
-import time
-from telepot.loop import MessageLoop
+from telegram import Update, Bot
+from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, CallbackContext
 
 # Telegram bot token
 BOT_TOKEN = '6015175658:AAH1ZQkPHCQwcgem4Szo0LNF5Gqred97kps'
 
-# Chat ID for your bot
-CHAT_ID = 600746930
+# Function to handle the /startRaspi command
+def start_raspi(update: Update, context: CallbackContext) -> None:
+    update.message.reply_text('Hello! I am your Raspberry Pi bot.')
 
-# Function to handle incoming messages
-def handle(msg):
-    content_type, chat_type, chat_id = telepot.glance(msg)
-    print('Received:', content_type, chat_type, chat_id)
+# Function to handle other text messages
+def handle_message(update: Update, context: CallbackContext) -> None:
+    command = update.message.text
+    print('Received command:', command)
 
-    # Respond to text messages
-    if content_type == 'text':
-        command = msg['text']
-        print('Received command:', command)
+    # Example: Respond to '/startRaspi' command (already handled by start_raspi)
+    if command == '/startRaspi':
+        start_raspi(update, context)
+    
+    # Add more commands as needed
 
-        # Example: Respond to '/start' command
-        if command == '/startRaspi':
-            bot.sendMessage(chat_id, 'Hello! I am your Raspberry Pi bot.')
+def main():
+    # Initialize the bot and updater
+    updater = Updater(BOT_TOKEN)
+    dispatcher = updater.dispatcher
 
-        # Add more commands as needed
+    # Add command handler for /startRaspi
+    dispatcher.add_handler(CommandHandler('startRaspi', start_raspi))
 
-try:
-    # Initialize the bot
-    bot = telepot.Bot(BOT_TOKEN)
+    # Add a message handler for other text messages
+    dispatcher.add_handler(MessageHandler(Filters.text & ~Filters.command, handle_message))
 
-    # Delete webhook if it exists
-    bot.deleteWebhook()
-
-    # Start message loop to continuously listen for messages
-    MessageLoop(bot, handle).run_as_thread()
+    # Start the bot
+    updater.start_polling()
     print('Listening...')
 
-    # Keep the program running
-    while True:
-        time.sleep(10)
+    # Run the bot until you press Ctrl-C
+    updater.idle()
 
-except telepot.exception.TelegramError as e:
-    print(f"TelegramError: {e}")
+if __name__ == '__main__':
+    main()
