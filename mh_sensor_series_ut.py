@@ -1,39 +1,35 @@
-import RPi.GPIO as GPIO
+import spidev
 import time
 
-# Set GPIO pins
-GPIO.setmode(GPIO.BCM)
-charge_pin = 23  # GPIO pin used to charge the capacitor
-measure_pin = 24  # GPIO pin used to measure the discharge time
+# Create SPI object
+spi = spidev.SpiDev()
+# Open SPI bus 0, device (CS) 0
+spi.open(0, 0)
 
-# Set up the GPIO pins
-GPIO.setup(charge_pin, GPIO.OUT)
-GPIO.setup(measure_pin, GPIO.IN)
+# Function to read SPI data from MCP3008
+def read_channel(channel):
+    adc = spi.xfer2([1, (8 + channel) << 4, 0])
+    data = ((adc[1] & 3) << 8) + adc[2]
+    return data
 
-def discharge():
-    GPIO.setup(measure_pin, GPIO.OUT)
-    GPIO.output(measure_pin, False)
-    time.sleep(0.01)
+# Function to convert data to voltage level
+def convert_volts(data, places):
+    volts = (data * 3.3) / float(1023)
+    volts = round(volts, places)
+    return volts
 
-def charge_time():
-    GPIO.setup(measure_pin, GPIO.IN)
-    count = 0
-    while not GPIO.input(measure_pin) and count < 10000:
-        count += 1
-    return count
-
-def analog_read():
-    GPIO.output(charge_pin, True)
-    time.sleep(0.01)
-    GPIO.output(charge_pin, False)
-    return charge_time()
-
+# Main program loop
 try:
     while True:
-        analog_value = analog_read()
-        print(f"Analog Value: {analog_value}")
+        # Read the analog input from channel 0
+        analog_input = read_channel(0)
+        voltage = convert_volts(analog_input, 2)
+        
+        print(f"Analog Input: {analog_input}, Voltage: {voltage}V")
+        
+        # Delay for a second
         time.sleep(1)
 
 except KeyboardInterrupt:
-    print("Measurement stopped by User")
-    GPIO.cleanup()
+    spi.close()
+    print("Program terminated.")
