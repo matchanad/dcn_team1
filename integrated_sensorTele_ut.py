@@ -6,7 +6,7 @@ from time import sleep
 from threading import Thread, Event
 
 # Telegram bot token
-BOT_TOKEN = 'YOUR_BOT_TOKEN_HERE'
+BOT_TOKEN = '7310002513:AAEQeDpJbzX9pXu8NTY0O7YNEYFweNw2xZs'
 
 # Initialize the bot
 bot = Bot(token=BOT_TOKEN)
