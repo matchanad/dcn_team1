@@ -124,7 +124,7 @@ def monitor_sensor():
                     send_alert()
             elif current_digital == calibrated_digital:
                 print("Secure")
-        time.sleep(1)
+        time.sleep(0.01)
 
 def send_alert():
     while alert_active.is_set():
@@ -132,7 +132,7 @@ def send_alert():
             bot.send_message(chat_id=current_chat_id, text='Alert! Break in detected! Type "safe" if the situation is under control.')
         except TelegramError as e:
             print(f"Error sending alert: {e}")
-        time.sleep(10)  # Wait for 10 seconds before sending the next alert
+        time.sleep(2)  # Wait for 2 seconds before sending the next alert
 
 def main():
     sensor_thread = Thread(target=monitor_sensor)
