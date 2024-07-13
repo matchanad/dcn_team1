@@ -3,7 +3,7 @@ from telegram import Bot, Update
 from telegram.error import TelegramError
 
 # Telegram bot token
-BOT_TOKEN = '6015175658:AAH1ZQkPHCQwcgem4Szo0LNF5Gqred97kps'
+BOT_TOKEN = '7310002513:AAEQeDpJbzX9pXu8NTY0O7YNEYFweNw2xZs'
 
 # Initialize the bot
 bot = Bot(token=BOT_TOKEN)
