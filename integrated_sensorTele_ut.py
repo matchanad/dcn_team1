@@ -21,6 +21,7 @@ sensor_active = Event()
 max_distance = None
 sensor_thread = None
 chat_states = {}
+sensor = None  # Initialize the sensor variable
 
 # States for the state machine
 STATE_IDLE = "idle"
@@ -72,9 +73,11 @@ def handle(update: Update) -> None:
         print(f"TelegramError: {e}")
 
 def calibrate_sensor(chat_id):
-    global max_distance
+    global max_distance, sensor
 
-    sensor = DistanceSensor(echo=ECHO, trigger=TRIG, max_distance=MAX_DISTANCE)
+    if sensor is None:
+        sensor = DistanceSensor(echo=ECHO, trigger=TRIG, max_distance=MAX_DISTANCE)
+
     distances = []
 
     start_time = time.time()
@@ -92,9 +95,10 @@ def calibrate_sensor(chat_id):
     chat_states[chat_id] = STATE_IDLE  # Reset state to idle after calibration
 
 def monitor_distance():
-    global max_distance
+    global max_distance, sensor
 
-    sensor = DistanceSensor(echo=ECHO, trigger=TRIG, max_distance=MAX_DISTANCE)
+    if sensor is None:
+        sensor = DistanceSensor(echo=ECHO, trigger=TRIG, max_distance=MAX_DISTANCE)
 
     while True:
         if sensor_active.is_set():
