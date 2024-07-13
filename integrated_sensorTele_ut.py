@@ -22,6 +22,7 @@ max_distance = None
 sensor_thread = None
 chat_states = {}
 sensor = None  # Initialize the sensor variable
+current_chat_id = None  # Store the current chat ID
 
 # States for the state machine
 STATE_IDLE = "idle"
@@ -30,9 +31,12 @@ STATE_SETUP_DOOR_CLOSED = "setup_door_closed"
 STATE_SETUP_CALIBRATION = "setup_calibration"
 
 def handle(update: Update) -> None:
+    global current_chat_id
+
     try:
         message = update.message
         chat_id = message.chat.id
+        current_chat_id = chat_id  # Update the current chat ID
         command = message.text
 
         print(f'Received command: {command}')
@@ -96,7 +100,7 @@ def calibrate_sensor(chat_id):
     chat_states[chat_id] = STATE_IDLE  # Reset state to idle after calibration
 
 def monitor_distance():
-    global max_distance, sensor
+    global max_distance, sensor, current_chat_id
 
     if sensor is None:
         sensor = DistanceSensor(echo=ECHO, trigger=TRIG, max_distance=MAX_DISTANCE)
@@ -106,8 +110,8 @@ def monitor_distance():
             distance_cm = sensor.distance * 100
             print(f"Measured Distance: {distance_cm:.2f} cm")
 
-            if distance_cm > max_distance:
-                bot.send_message(chat_id=chat_id, text='Alert! Break in!.')
+            if distance_cm > max_distance and current_chat_id is not None:
+                bot.send_message(chat_id=current_chat_id, text='Alert! Break in!')
                 sensor_active.clear()
 
         sleep(1)
