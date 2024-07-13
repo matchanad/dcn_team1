@@ -2,8 +2,8 @@ from gpiozero import DistanceSensor
 from time import sleep
 
 # Define GPIO pins and Maximum Distance for Break-in
-TRIG = 4  # GPIO pin connected to the TRIG pin of HC-SR04
-ECHO = 17  # GPIO pin connected to the ECHO pin of HC-SR04
+TRIG = 12  # GPIO pin connected to the TRIG pin of HC-SR04
+ECHO = 13  # GPIO pin connected to the ECHO pin of HC-SR04
 MAX_DISTANCE = 4  # Maximum distance the sensor can measure in meters
 
 def main():
@@ -26,7 +26,7 @@ def main():
             except RuntimeError:
                 print("Sensor error: Unable to read distance")
 
-            sleep(1)
+            sleep(0.5)
 
     except KeyboardInterrupt:
         print("Measurement stopped by user")

@@ -15,7 +15,9 @@ def detect_break_in():
     try:
         while True:
             if GPIO.input(SENSOR_PIN):
-                print("Break-in detected!")
+                print("HIGH - Break-in detected!")
+            else:
+                print("LOW - Door/Window is closed")
                 # Add your alarm or notification code here
             time.sleep(0.1)
     except KeyboardInterrupt:
