@@ -10,42 +10,29 @@ BOT_TOKEN = '7310002513:AAEQeDpJbzX9pXu8NTY0O7YNEYFweNw2xZs'
 # Initialize the bot
 bot = Bot(token=BOT_TOKEN)
 
-# Define GPIO pins for MH series sensor
-ANALOG_PIN = 17
+# Define GPIO pin for digital sensor
 DIGITAL_PIN = 27
 
 # Global variables
 sensor_active = Event()
 chat_states = {}
 current_chat_id = None
-calibrated_analog = None
 calibrated_digital = None
+alert_active = Event()
 
 # States for the state machine
 STATE_IDLE = "idle"
 STATE_SETUP_INSTALLATION = "setup_installation"
 STATE_SETUP_CALIBRATION = "setup_calibration"
+STATE_CHECK_BLACK_SURFACE = "check_black_surface"
+STATE_ALERT = "alert"
 
 # Set up GPIO
 GPIO.setmode(GPIO.BCM)
 GPIO.setup(DIGITAL_PIN, GPIO.IN)
-GPIO.setup(ANALOG_PIN, GPIO.IN)
-
-def read_analog():
-    # Discharge capacitor
-    GPIO.setup(ANALOG_PIN, GPIO.OUT)
-    GPIO.output(ANALOG_PIN, GPIO.LOW)
-    time.sleep(0.1)
-
-    # Count the time it takes to charge the capacitor
-    start_time = time.time()
-    GPIO.setup(ANALOG_PIN, GPIO.IN)
-    end_time = time.time()
-
-    return int((end_time - start_time) * 1000000)  # Return microseconds
 
 def handle(update: Update) -> None:
-    global current_chat_id
+    global current_chat_id, calibrated_digital
 
     try:
         message = update.message
@@ -57,9 +44,17 @@ def handle(update: Update) -> None:
 
         current_state = chat_states.get(chat_id, STATE_IDLE)
 
-        if current_state == STATE_IDLE:
+        if current_state == STATE_ALERT:
+            if command.lower() == 'safe':
+                alert_active.clear()
+                sensor_active.clear()
+                chat_states[chat_id] = STATE_IDLE
+                bot.send_message(chat_id=chat_id, text='Alert cancelled. Sensor protection stopped.')
+            else:
+                bot.send_message(chat_id=chat_id, text='Break-in alert is still active! Type "safe" if the situation is under control.')
+        elif current_state == STATE_IDLE:
             if command == '/startProtect':
-                if calibrated_analog is None or calibrated_digital is None:
+                if calibrated_digital is None:
                     bot.send_message(chat_id=chat_id, text='Please set up the sensor first using /setupSensor.')
                 else:
                     sensor_active.set()
@@ -84,113 +79,69 @@ def handle(update: Update) -> None:
             else:
                 bot.send_message(chat_id=chat_id, text='Please close the door/window, then reply with "ready" to start calibration.')
 
+        elif current_state == STATE_CHECK_BLACK_SURFACE:
+            if command.lower() == 'yes':
+                bot.send_message(chat_id=chat_id, text='Please place a reflective surface or any non-black material opposite to the sensor. This could be a small piece of white tape, aluminum foil, or any light-colored material. Once done, reply with "done".')
+                chat_states[chat_id] = STATE_SETUP_CALIBRATION
+            else:
+                bot.send_message(chat_id=chat_id, text='The sensor is not detecting a closed door/window. Please check the installation and try the setup again using /setupSensor.')
+                chat_states[chat_id] = STATE_IDLE
+
     except TelegramError as e:
         print(f"TelegramError: {e}")
 
-def is_black_surface():
-    # Take a few readings to determine if it's a black surface
-    readings = [read_analog() for _ in range(5)]
-    average_reading = sum(readings) / len(readings)
-    # Adjust this threshold based on your sensor's behavior with black surfaces
-    return average_reading > 900  # High analog value typically indicates a black surface
-
 def calibrate_sensor(chat_id):
-    global calibrated_analog, calibrated_digital
+    global calibrated_digital
 
     bot.send_message(chat_id=chat_id, text='Starting calibration. Please ensure the door/window is closed.')
     
-    if is_black_surface():
-        bot.send_message(chat_id=chat_id, text='Black surface detected. Calibrating analog values only.')
-        analog_values = []
-        for _ in range(30):
-            analog_value = read_analog()
-            analog_values.append(analog_value)
-            print(f"Analog value: {analog_value}")
-            time.sleep(1)
-        
-        if max(analog_values) - min(analog_values) < 100:
-            calibrated_analog = sum(analog_values) / len(analog_values)
-            calibrated_digital = None  # We won't use digital for black surfaces
-            bot.send_message(chat_id=chat_id, text=f'Calibration complete. Analog: {calibrated_analog:.2f}')
-            chat_states[chat_id] = STATE_IDLE
-        else:
-            bot.send_message(chat_id=chat_id, text='Calibration failed. Analog values not stable. Please try again.')
-            chat_states[chat_id] = STATE_SETUP_CALIBRATION
-    else:
-        # Check if the door is closed using digital value
-        for _ in range(5):  # Try 5 times
-            digital_value = GPIO.input(DIGITAL_PIN)
-            if digital_value == 0:  # Assuming 0 means closed
-                break
-            bot.send_message(chat_id=chat_id, text='The door/window appears to be open. Please close it and wait.')
-            time.sleep(5)
-        else:  # This executes if the for loop completes without breaking
-            bot.send_message(chat_id=chat_id, text='Could not detect a closed door/window. Please try setup again.')
+    # Check if the door is closed using digital value
+    for _ in range(5):  # Try 5 times
+        digital_value = GPIO.input(DIGITAL_PIN)
+        if digital_value == 0:  # Assuming 0 means closed
+            calibrated_digital = 0
+            bot.send_message(chat_id=chat_id, text='Calibration complete. The sensor is working correctly.')
             chat_states[chat_id] = STATE_IDLE
             return
+        time.sleep(1)
+    
+    # If we get here, the sensor is not detecting a closed door
+    bot.send_message(chat_id=chat_id, text='The sensor is not detecting a closed door/window. Is the door/window surface black or very dark? Reply with "yes" or "no".')
+    chat_states[chat_id] = STATE_CHECK_BLACK_SURFACE
 
-        bot.send_message(chat_id=chat_id, text='Door/window detected as closed. Beginning calibration...')
-        
-        analog_values = []
-        digital_values = []
-
-        # Take 30 readings over 30 seconds
-        for _ in range(30):
-            digital_value = GPIO.input(DIGITAL_PIN)
-            analog_value = read_analog()
-            digital_values.append(digital_value)
-            analog_values.append(analog_value)
-            print(f"Digital value: {digital_value}, Analog value: {analog_value}")
-            time.sleep(1)
-
-        # Check if the values are stable
-        digital_stable = all(value == 0 for value in digital_values)
-        analog_stable = max(analog_values) - min(analog_values) < 100
-
-        if digital_stable and analog_stable:
-            calibrated_digital = 0
-            calibrated_analog = sum(analog_values) / len(analog_values)
-            bot.send_message(chat_id=chat_id, text=f'Calibration complete. Digital: LOW, Analog: {calibrated_analog:.2f}')
-            chat_states[chat_id] = STATE_IDLE
-        else:
-            if not digital_stable:
-                bot.send_message(chat_id=chat_id, text='Calibration failed. Door/window not consistently closed. Please try again.')
-            elif not analog_stable:
-                bot.send_message(chat_id=chat_id, text='Calibration failed. Analog values not stable. Please try again.')
-            chat_states[chat_id] = STATE_SETUP_CALIBRATION
-            
 def monitor_sensor():
-    global current_chat_id, calibrated_analog, calibrated_digital
+    global current_chat_id, calibrated_digital
 
     while True:
-        if sensor_active.is_set() and calibrated_analog is not None:
-            current_analog = read_analog()
-            current_digital = GPIO.input(DIGITAL_PIN) if calibrated_digital is not None else None
+        if sensor_active.is_set() and calibrated_digital is not None:
+            current_digital = GPIO.input(DIGITAL_PIN)
 
-            if calibrated_digital is None:
-                # For black surfaces, only check analog
-                if abs(current_analog - calibrated_analog) > 100:
-                    print("Break-in detected!")
-                    if current_chat_id is not None:
-                        bot.send_message(chat_id=current_chat_id, text='Alert! Break in!')
-                        sensor_active.clear()
-                else:
-                    print("Secure")
-            else:
-                # For non-black surfaces, check both analog and digital
-                if abs(current_analog - calibrated_analog) > 100 or current_digital != calibrated_digital:
-                    print("Break-in detected!")
-                    if current_chat_id is not None:
-                        bot.send_message(chat_id=current_chat_id, text='Alert! Break in!')
-                        sensor_active.clear()
-                else:
-                    print("Secure")
+            if current_digital != calibrated_digital and not alert_active.is_set():
+                print("Break-in detected!")
+                if current_chat_id is not None:
+                    alert_active.set()
+                    chat_states[current_chat_id] = STATE_ALERT
+                    send_alert()
+            elif current_digital == calibrated_digital:
+                print("Secure")
         time.sleep(1)
+
+def send_alert():
+    while alert_active.is_set():
+        try:
+            bot.send_message(chat_id=current_chat_id, text='Alert! Break in detected! Type "safe" if the situation is under control.')
+        except TelegramError as e:
+            print(f"Error sending alert: {e}")
+        time.sleep(10)  # Wait for 10 seconds before sending the next alert
 
 def main():
     sensor_thread = Thread(target=monitor_sensor)
     sensor_thread.daemon = True
     sensor_thread.start()
+
+    alert_thread = Thread(target=send_alert)
+    alert_thread.daemon = True
+    alert_thread.start()
 
     offset = None
 
