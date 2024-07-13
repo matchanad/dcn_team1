@@ -1,5 +1,5 @@
 import time
-from telegram import Bot, Update
+from telegram import Bot, Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.error import TelegramError
 import RPi.GPIO as GPIO
 from threading import Thread, Event
@@ -31,15 +31,25 @@ STATE_ALERT = "alert"
 GPIO.setmode(GPIO.BCM)
 GPIO.setup(DIGITAL_PIN, GPIO.IN)
 
+def create_keyboard(options):
+    keyboard = [[InlineKeyboardButton(text, callback_data=text)] for text in options]
+    return InlineKeyboardMarkup(keyboard)
+
 def handle(update: Update) -> None:
     global current_chat_id, calibrated_digital
 
     try:
-        message = update.message
-        chat_id = message.chat.id
-        current_chat_id = chat_id
-        command = message.text
+        if update.callback_query:
+            query = update.callback_query
+            chat_id = query.message.chat_id
+            command = query.data
+            query.answer()
+        else:
+            message = update.message
+            chat_id = message.chat_id
+            command = message.text
 
+        current_chat_id = chat_id
         print(f'Received command: {command}')
 
         current_state = chat_states.get(chat_id, STATE_IDLE)
@@ -51,40 +61,46 @@ def handle(update: Update) -> None:
                 chat_states[chat_id] = STATE_IDLE
                 bot.send_message(chat_id=chat_id, text='Alert cancelled. Sensor protection stopped.')
             else:
-                bot.send_message(chat_id=chat_id, text='Break-in alert is still active! Type "safe" if the situation is under control.')
+                keyboard = create_keyboard(['Safe'])
+                bot.send_message(chat_id=chat_id, text='Break-in alert is still active! Tap "Safe" if the situation is under control.', reply_markup=keyboard)
         elif current_state == STATE_IDLE:
-            if command == '/startProtect':
+            if command == '/start_protect':
                 if calibrated_digital is None:
-                    bot.send_message(chat_id=chat_id, text='Please set up the sensor first using /setupSensor.')
+                    bot.send_message(chat_id=chat_id, text='Please set up the sensor first using /setup_sensor.')
                 else:
                     sensor_active.set()
                     bot.send_message(chat_id=chat_id, text='Protection started.')
-            elif command == '/endProtect':
+            elif command == '/end_protect':
                 sensor_active.clear()
                 bot.send_message(chat_id=chat_id, text='Protection ended.')
-            elif command == '/setupSensor':
+            elif command == '/setup_sensor':
                 chat_states[chat_id] = STATE_SETUP_INSTALLATION
-                bot.send_message(chat_id=chat_id, text='Have you installed the sensor at the desired location? If yes, reply with "yes".')
+                keyboard = create_keyboard(['Yes', 'No'])
+                bot.send_message(chat_id=chat_id, text='Have you installed the sensor at the desired location?', reply_markup=keyboard)
 
         elif current_state == STATE_SETUP_INSTALLATION:
-            if command.lower() == 'yes':
+            if command == 'Yes':
                 chat_states[chat_id] = STATE_SETUP_CALIBRATION
-                bot.send_message(chat_id=chat_id, text='Please close the door/window, then reply with "ready" to start calibration.')
+                keyboard = create_keyboard(['Ready'])
+                bot.send_message(chat_id=chat_id, text='Please close the door/window, then tap "Ready" to start calibration.', reply_markup=keyboard)
             else:
-                bot.send_message(chat_id=chat_id, text='Please install the sensor at the desired location and reply with "yes".')
+                keyboard = create_keyboard(['Yes'])
+                bot.send_message(chat_id=chat_id, text='Please install the sensor at the desired location and tap "Yes" when done.', reply_markup=keyboard)
 
         elif current_state == STATE_SETUP_CALIBRATION:
-            if command.lower() == 'ready':
+            if command == 'Ready':
                 calibrate_sensor(chat_id)
             else:
-                bot.send_message(chat_id=chat_id, text='Please close the door/window, then reply with "ready" to start calibration.')
+                keyboard = create_keyboard(['Ready'])
+                bot.send_message(chat_id=chat_id, text='Please close the door/window, then tap "Ready" to start calibration.', reply_markup=keyboard)
 
         elif current_state == STATE_CHECK_BLACK_SURFACE:
-            if command.lower() == 'yes':
-                bot.send_message(chat_id=chat_id, text='Please place a reflective surface or any non-black material opposite to the sensor. This could be a small piece of white tape, aluminum foil, or any light-colored material. Once done, reply with "done".')
+            if command == 'Yes':
+                keyboard = create_keyboard(['Done'])
+                bot.send_message(chat_id=chat_id, text='Please place a reflective surface or any non-black material opposite to the sensor. This could be a small piece of white tape, aluminum foil, or any light-colored material. Tap "Done" when finished.', reply_markup=keyboard)
                 chat_states[chat_id] = STATE_SETUP_CALIBRATION
             else:
-                bot.send_message(chat_id=chat_id, text='The sensor is not detecting a closed door/window. Please check the installation and try the setup again using /setupSensor.')
+                bot.send_message(chat_id=chat_id, text='The sensor is not detecting a closed door/window. Please check the installation and try the setup again using /setup_sensor.')
                 chat_states[chat_id] = STATE_IDLE
 
     except TelegramError as e:
@@ -106,7 +122,8 @@ def calibrate_sensor(chat_id):
         time.sleep(1)
     
     # If we get here, the sensor is not detecting a closed door
-    bot.send_message(chat_id=chat_id, text='The sensor is not detecting a closed door/window. Is the door/window surface black or very dark? Reply with "yes" or "no".')
+    keyboard = create_keyboard(['Yes', 'No'])
+    bot.send_message(chat_id=chat_id, text='The sensor is not detecting a closed door/window. Is the door/window surface black or very dark?', reply_markup=keyboard)
     chat_states[chat_id] = STATE_CHECK_BLACK_SURFACE
 
 def monitor_sensor():
@@ -129,7 +146,8 @@ def monitor_sensor():
 def send_alert():
     while alert_active.is_set():
         try:
-            bot.send_message(chat_id=current_chat_id, text='Alert! Break in detected! Type "safe" if the situation is under control.')
+            keyboard = create_keyboard(['Safe'])
+            bot.send_message(chat_id=current_chat_id, text='Alert! Break in detected! Tap "Safe" if the situation is under control.', reply_markup=keyboard)
         except TelegramError as e:
             print(f"Error sending alert: {e}")
         time.sleep(2)  # Wait for 2 seconds before sending the next alert
