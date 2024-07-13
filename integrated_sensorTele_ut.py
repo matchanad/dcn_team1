@@ -12,8 +12,8 @@ BOT_TOKEN = '7310002513:AAEQeDpJbzX9pXu8NTY0O7YNEYFweNw2xZs'
 bot = Bot(token=BOT_TOKEN)
 
 # Define GPIO pins and Maximum Distance for Break-in
-TRIG = 23  # GPIO pin connected to the TRIG pin of HC-SR04
-ECHO = 24  # GPIO pin connected to the ECHO pin of HC-SR04
+TRIG = 4  # GPIO pin connected to the TRIG pin of HC-SR04
+ECHO = 17 # GPIO pin connected to the ECHO pin of HC-SR04
 MAX_DISTANCE = 4  # Maximum distance the sensor can measure in meters
 
 # Global variables
@@ -81,9 +81,10 @@ def calibrate_sensor(chat_id):
     distances = []
 
     start_time = time.time()
-    while time.time() - start_time < 15:
+    while time.time() - start_time < 10:
         distance_cm = sensor.distance * 100
         distances.append(distance_cm)
+        print(f"Measured Distance: {distance_cm:.2f} cm")
         sleep(1)
 
     if len(set(distances)) == 1:  # Check if all measurements are the same
@@ -106,7 +107,7 @@ def monitor_distance():
             print(f"Measured Distance: {distance_cm:.2f} cm")
 
             if distance_cm > max_distance:
-                bot.send_message(chat_id=chat_id, text="Break in!")
+                bot.send_message(chat_id=chat_id, text='Alert! Break in!.')
                 sensor_active.clear()
 
         sleep(1)
