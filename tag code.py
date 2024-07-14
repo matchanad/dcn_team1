@@ -5,11 +5,6 @@ import time
 # Initialize the RFID reader
 reader = SimpleMFRC522()
 
-# Set up the GPIO pin for the LED
-LED_PIN = 18
-GPIO.setmode(GPIO.BCM)
-GPIO.setup(LED_PIN, GPIO.OUT)
-
 try:
     while True:
         print("Place your RFID card/tag near the reader")
@@ -19,10 +14,7 @@ try:
         print(f"ID: {id}")
         print(f"Text: {text}")
         
-        # Action: Toggle LED
-        GPIO.output(LED_PIN, not GPIO.input(LED_PIN))
-        
-        print("LED state toggled")
+        print("RFID tag detected and details printed")
         print("-----")
         
         # Wait for a while to avoid multiple readings
