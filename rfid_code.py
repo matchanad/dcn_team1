@@ -1,23 +1,15 @@
 import RPi.GPIO as GPIO
 from mfrc522 import SimpleMFRC522
-import time
 
-# Initialize the RFID reader
-reader = SimpleMFRC522()
-
-try:
-    while True:
-        print("Place your RFID card/tag near the reader")
-        
-        # Read the RFID card/tag
+def read_rfid():
+    reader = SimpleMFRC522()
+    try:
+        print("Hold a tag near the reader")
         id, text = reader.read()
         print(f"ID: {id}")
         print(f"Text: {text}")
-        
-        print("RFID tag detected and details printed")
-        print("-----")
-        
-        # Wait for a while to avoid multiple readings
-        time.sleep(2)
-finally:
-    GPIO.cleanup()
+    finally:
+        GPIO.cleanup()
+
+if __name__ == "__main__":
+    read_rfid()
