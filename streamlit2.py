@@ -11,7 +11,7 @@ import streamlit as st
 import pandas as pd
 import altair as alt
 
-# Create the SPI bus
+# Create the SPI bus adam
 spi = busio.SPI(clock=board.SCK, MISO=board.MISO, MOSI=board.MOSI)
 
 # Create the CS (chip select)
