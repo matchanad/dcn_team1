@@ -8,8 +8,7 @@ import adafruit_mcp3xxx.mcp3008 as MCP
 from adafruit_mcp3xxx.analog_in import AnalogIn
 from time import sleep, time
 import streamlit as st
-import matplotlib.pyplot as plt
-import numpy as np
+import pandas as pd
 
 # Create the SPI bus
 spi = busio.SPI(clock=board.SCK, MISO=board.MISO, MOSI=board.MOSI)
@@ -32,7 +31,7 @@ start_time = time()
 
 # Set up the Streamlit app
 st.title('Real-time Voltage from MCP3008')
-chart = st.line_chart()
+chart = st.line_chart(pd.DataFrame({'Time': [], 'Voltage': []}))
 
 # Function to read data and update plot
 def read_data():
@@ -52,12 +51,12 @@ def read_data():
         voltage_data.pop(0)
 
     # Create a DataFrame with the time and voltage data
-    data = {'Time': time_data, 'Voltage': voltage_data}
+    data = pd.DataFrame({'Time': time_data, 'Voltage': voltage_data})
     return data
 
 # Read data and update plot in a loop
-while True:
-    try:
+try:
+    while True:
         # Read data
         data = read_data()
         
@@ -66,7 +65,7 @@ while True:
         
         # Sleep for 1 second
         sleep(1)
-    except KeyboardInterrupt:
-        # Exit the loop when Ctrl+C is pressed
-        print("Exiting...")
-        break
+except KeyboardInterrupt:
+    # Exit the loop when Ctrl+C is pressed
+    print("Exiting...")
+
