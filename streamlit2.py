@@ -1,27 +1,58 @@
 # SPDX-FileCopyrightText: 2021 ladyada for Adafruit Industries
 # SPDX-License-Identifier: MIT
 
-import busio
-import digitalio
-import board
-import adafruit_mcp3xxx.mcp3008 as MCP
-from adafruit_mcp3xxx.analog_in import AnalogIn
 from time import sleep, time
 import streamlit as st
 import pandas as pd
 import altair as alt
 
-# Create the SPI bus adam
-spi = busio.SPI(clock=board.SCK, MISO=board.MISO, MOSI=board.MOSI)
+# Import or mock hardware components
+try:
+    import busio
+    import digitalio
+    import board
+    import adafruit_mcp3xxx.mcp3008 as MCP
+    from adafruit_mcp3xxx.analog_in import AnalogIn
+    hardware_available = True
+except ImportError:
+    hardware_available = False
 
-# Create the CS (chip select)
-cs = digitalio.DigitalInOut(board.D5)
+class MockSPI:
+    def __init__(self, *args, **kwargs):
+        pass
 
-# Create the MCP object
-mcp = MCP.MCP3008(spi, cs)
+class MockDigitalInOut:
+    def __init__(self, *args, **kwargs):
+        self.direction = None
+        self.value = 0
 
-# Create an analog input channel on pin 0
-chan = AnalogIn(mcp, MCP.P0)
+class MockAnalogIn:
+    def __init__(self, *args, **kwargs):
+        self.voltage = 0.0
+
+if hardware_available:
+    # Create the SPI bus
+    spi = busio.SPI(clock=board.SCK, MISO=board.MISO, MOSI=board.MOSI)
+
+    # Create the CS (chip select)
+    cs = digitalio.DigitalInOut(board.D5)
+
+    # Create the MCP object
+    mcp = MCP.MCP3008(spi, cs)
+
+    # Create an analog input channel on pin 0
+    chan = AnalogIn(mcp, MCP.P0)
+
+    # Initialize the digital input pin (e.g., D6)
+    digital_pin = digitalio.DigitalInOut(board.D6)
+    digital_pin.direction = digitalio.Direction.INPUT
+else:
+    # Mock the hardware components
+    spi = MockSPI()
+    cs = MockDigitalInOut()
+    mcp = None
+    chan = MockAnalogIn()
+    digital_pin = MockDigitalInOut()
 
 # Initialize lists to store time and voltage data
 time_data = []
