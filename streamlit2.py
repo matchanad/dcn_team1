@@ -5,46 +5,57 @@ from time import sleep, time
 import streamlit as st
 import pandas as pd
 import altair as alt
-import spidev
-import RPi.GPIO as GPIO
 
-# Set up SPI bus
+# Mocking the hardware-related components for environments without the required hardware
+class MockSPI:
+    def _init_(self, *args, **kwargs):
+        pass
+
+class MockDigitalInOut:
+    def _init_(self, *args, **kwargs):
+        self.direction = None
+        self.value = 0
+
+class MockAnalogIn:
+    def _init_(self, *args, **kwargs):
+        self.voltage = 0.0
+
+    def read_voltage(self):
+        return self.voltage
+
 try:
-    spi = spidev.SpiDev()
-    spi.open(0, 0)  # Open SPI bus 0, device (CS) 0
-    spi.max_speed_hz = 1350000  # Set max speed
-    print("SPI initialized successfully")
-except Exception as e:
-    print(f"Error initializing SPI: {e}")
+    import busio
+    import digitalio
+    import board
+    import adafruit_mcp3xxx.mcp3008 as MCP
+    from adafruit_mcp3xxx.analog_in import AnalogIn
+    hardware_available = True
+except ImportError:
+    hardware_available = False
 
-# Set up GPIO for digital input
-try:
-    GPIO.setmode(GPIO.BCM)
-    digital_pin = 6
-    GPIO.setup(digital_pin, GPIO.IN)
-    print("GPIO initialized successfully")
-except Exception as e:
-    print(f"Error initializing GPIO: {e}")
+if hardware_available:
+    # Create the SPI bus
+    spi = busio.SPI(clock=board.SCK, MISO=board.MISO, MOSI=board.MOSI)
 
-def read_adc(channel):
-    """Read ADC from the specified channel (0-7)"""
-    try:
-        if channel < 0 or channel > 7:
-            return -1
-        r = spi.xfer2([1, (8 + channel) << 4, 0])
-        adc_out = ((r[1] & 3) << 8) + r[2]
-        return adc_out
-    except Exception as e:
-        print(f"Error reading ADC: {e}")
-        return -1
+    # Create the CS (chip select)
+    cs = digitalio.DigitalInOut(board.D5)
 
-def convert_to_voltage(adc_value):
-    """Convert the raw ADC value to a voltage (0-3.3V)"""
-    try:
-        return adc_value * (3.3 / 1023.0)
-    except Exception as e:
-        print(f"Error converting to voltage: {e}")
-        return 0.0
+    # Create the MCP object
+    mcp = MCP.MCP3008(spi, cs)
+
+    # Create an analog input channel on pin 0
+    chan = AnalogIn(mcp, MCP.P0)
+
+    # Initialize the digital input pin (e.g., D6)
+    digital_pin = digitalio.DigitalInOut(board.D6)
+    digital_pin.direction = digitalio.Direction.INPUT
+else:
+    # Mock the hardware components
+    spi = MockSPI()
+    cs = MockDigitalInOut()
+    mcp = None
+    chan = MockAnalogIn()
+    digital_pin = MockDigitalInOut()
 
 # Initialize lists to store time and voltage data
 time_data = []
@@ -60,39 +71,37 @@ status_placeholder = st.empty()
 
 # Function to read data and update plot
 def read_data():
-    try:
-        # Get the current voltage
-        adc_value = read_adc(0)
-        voltage = convert_to_voltage(adc_value)
+    if hardware_available:
+        # Get the current voltage from the actual sensor
+        voltage = chan.voltage
+        digital_value = digital_pin.value
+    else:
+        # Simulate voltage and digital value
+        voltage = chan.read_voltage()
+        digital_value = 0  # Default to 0 since no hardware is available
 
-        # Get the current state of the digital pin
-        digital_value = GPIO.input(digital_pin)
+    # Calculate elapsed time
+    current_time = time() - start_time
 
-        # Calculate elapsed time
-        current_time = time() - start_time
+    # Append the time and voltage data to the lists
+    time_data.append(current_time)
+    voltage_data.append(voltage)
 
-        # Append the time and voltage data to the lists
-        time_data.append(current_time)
-        voltage_data.append(voltage)
+    # Keep the last 100 data points
+    if len(time_data) > 100:
+        time_data.pop(0)
+        voltage_data.pop(0)
 
-        # Keep the last 100 data points
-        if len(time_data) > 100:
-            time_data.pop(0)
-            voltage_data.pop(0)
-
-        # Create a DataFrame with the time and voltage data
-        data = pd.DataFrame({'Time': time_data, 'Voltage': voltage_data})
-        return data, voltage, digital_value
-    except Exception as e:
-        print(f"Error in read_data: {e}")
-        return pd.DataFrame({'Time': [], 'Voltage': []}), 0.0, 0
+    # Create a DataFrame with the time and voltage data
+    data = pd.DataFrame({'Time': time_data, 'Voltage': voltage_data})
+    return data, voltage, digital_value
 
 # Read data and update plot in a loop
 try:
     while True:
         # Read data
         data, current_voltage, digital_value = read_data()
-
+        
         # Create an Altair chart
         chart = alt.Chart(data).mark_line().encode(
             x=alt.X('Time:Q', title='Time (s)'),
@@ -101,10 +110,10 @@ try:
             width=700,
             height=400
         )
-
+        
         # Update the Streamlit chart
         chart_placeholder.altair_chart(chart)
-
+        
         # Determine door/window status and color
         if digital_value == 1:
             status = "Open"
@@ -112,7 +121,7 @@ try:
         else:
             status = "Closed"
             status_color = "#00FF00"  # Green
-
+        
         # Create a DataFrame to display the status in a table
         status_html = f"""
         <div style="display: flex; align-items: center;">
@@ -123,15 +132,11 @@ try:
             </div>
         </div>
         """
-
+        
         status_placeholder.markdown(status_html, unsafe_allow_html=True)
-
+        
         # Sleep for 1 second
         sleep(1)
 except KeyboardInterrupt:
     # Exit the loop when Ctrl+C is pressed
     print("Exiting...")
-finally:
-    # Clean up GPIO
-    GPIO.cleanup()
-    spi.close()
