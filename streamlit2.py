@@ -5,48 +5,21 @@ from time import sleep, time
 import streamlit as st
 import pandas as pd
 import altair as alt
+import random
 
-# Attempt to import hardware components
-try:
-    import busio
-    import digitalio
-    import board
-    import adafruit_mcp3xxx.mcp3008 as MCP
-    from adafruit_mcp3xxx.analog_in import AnalogIn
-    hardware_available = True
-except ImportError:
-    hardware_available = False
-
-# Mock classes for hardware components
-class MockSPI:
-    def __init__(self, *args, **kwargs):
-        pass
-
-class MockDigitalInOut:
-    def __init__(self, *args, **kwargs):
-        self.direction = None
-        self.value = 0
+# Mocking the hardware-related components for environments without the required hardware
 
 class MockAnalogIn:
-    def __init__(self, *args, **kwargs):
+    def __init__(self):
         self.voltage = 0.0
 
-# Initialize hardware or mock components
-if hardware_available:
-    # Create the SPI bus
-    spi = busio.SPI(clock=board.SCK, MISO=board.MISO, MOSI=board.MOSI)
-    # Create the CS (chip select)
-    cs = digitalio.DigitalInOut(board.D5)
-    # Create the MCP object
-    mcp = MCP.MCP3008(spi, cs)
-    # Create an analog input channel on pin 0
-    chan = AnalogIn(mcp, MCP.P0)
-else:
-    # Mock the hardware components
-    spi = MockSPI()
-    cs = MockDigitalInOut()
-    mcp = None
-    chan = MockAnalogIn()
+    def read_voltage(self):
+        # Simulate voltage reading with random values between 0 and 3.3V
+        self.voltage = random.uniform(0, 3.3)
+        return self.voltage
+
+# Use the mock class to simulate the analog input channel
+chan = MockAnalogIn()
 
 # Initialize lists to store time and voltage data
 time_data = []
@@ -56,23 +29,27 @@ voltage_data = []
 start_time = time()
 
 # Set up the Streamlit app
-st.title('Real-time Voltage from MCP3008')
+st.title('Real-time Voltage from MCP3008 (Simulated)')
 chart_placeholder = st.empty()
 status_placeholder = st.empty()
 
 # Function to read data and update plot
 def read_data():
     # Get the current voltage
-    voltage = chan.voltage
+    voltage = chan.read_voltage()
+
     # Calculate elapsed time
     current_time = time() - start_time
+
     # Append the time and voltage data to the lists
     time_data.append(current_time)
     voltage_data.append(voltage)
+
     # Keep the last 100 data points
     if len(time_data) > 100:
         time_data.pop(0)
         voltage_data.pop(0)
+
     # Create a DataFrame with the time and voltage data
     data = pd.DataFrame({'Time': time_data, 'Voltage': voltage_data})
     return data, voltage
@@ -82,6 +59,7 @@ try:
     while True:
         # Read data
         data, current_voltage = read_data()
+        
         # Create an Altair chart
         chart = alt.Chart(data).mark_line().encode(
             x=alt.X('Time:Q', title='Time (s)'),
@@ -90,8 +68,10 @@ try:
             width=700,
             height=400
         )
+        
         # Update the Streamlit chart
         chart_placeholder.altair_chart(chart)
+        
         # Determine door/window status and color
         if current_voltage > 1:
             status = "Open"
@@ -99,6 +79,7 @@ try:
         else:
             status = "Closed"
             status_color = "#00FF00"  # Green
+        
         # Create a DataFrame to display the status in a table
         status_html = f"""
         <div style="display: flex; align-items: center;">
@@ -109,7 +90,9 @@ try:
             </div>
         </div>
         """
+        
         status_placeholder.markdown(status_html, unsafe_allow_html=True)
+        
         # Sleep for 1 second
         sleep(1)
 except KeyboardInterrupt:
