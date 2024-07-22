@@ -8,8 +8,8 @@ from adafruit_mcp3xxx.analog_in import AnalogIn
 
 # Replace these values with your Azure IoT Central information
 id_scope = "0ne00CDBD95"
-device_id = "tcrt5000"
-primary_key = "tmzgh6TO1zrU7ixSpAlGvk7LI2Bbbrbk4QeFzcECRyw="
+device_id = "27yzuc90d6v"
+primary_key = "cBkkyw8/SDdwPygExhk8npwAPyHsqO0H7832Xx+XSR0="
 
 provisioning_host = "global.azure-devices-provisioning.net"
 template = "{\"Voltage\": %.2f, \"State\": \"%s\"}"
