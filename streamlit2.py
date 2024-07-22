@@ -6,7 +6,7 @@ import streamlit as st
 import pandas as pd
 import altair as alt
 
-# Import or mock hardware components
+# Attempt to import hardware components
 try:
     import busio
     import digitalio
@@ -17,6 +17,7 @@ try:
 except ImportError:
     hardware_available = False
 
+# Mock classes for hardware components
 class MockSPI:
     def __init__(self, *args, **kwargs):
         pass
@@ -30,29 +31,22 @@ class MockAnalogIn:
     def __init__(self, *args, **kwargs):
         self.voltage = 0.0
 
+# Initialize hardware or mock components
 if hardware_available:
     # Create the SPI bus
     spi = busio.SPI(clock=board.SCK, MISO=board.MISO, MOSI=board.MOSI)
-
     # Create the CS (chip select)
     cs = digitalio.DigitalInOut(board.D5)
-
     # Create the MCP object
     mcp = MCP.MCP3008(spi, cs)
-
     # Create an analog input channel on pin 0
     chan = AnalogIn(mcp, MCP.P0)
-
-    # Initialize the digital input pin (e.g., D6)
-    digital_pin = digitalio.DigitalInOut(board.D6)
-    digital_pin.direction = digitalio.Direction.INPUT
 else:
     # Mock the hardware components
     spi = MockSPI()
     cs = MockDigitalInOut()
     mcp = None
     chan = MockAnalogIn()
-    digital_pin = MockDigitalInOut()
 
 # Initialize lists to store time and voltage data
 time_data = []
@@ -70,19 +64,15 @@ status_placeholder = st.empty()
 def read_data():
     # Get the current voltage
     voltage = chan.voltage
-
     # Calculate elapsed time
     current_time = time() - start_time
-
     # Append the time and voltage data to the lists
     time_data.append(current_time)
     voltage_data.append(voltage)
-
     # Keep the last 100 data points
     if len(time_data) > 100:
         time_data.pop(0)
         voltage_data.pop(0)
-
     # Create a DataFrame with the time and voltage data
     data = pd.DataFrame({'Time': time_data, 'Voltage': voltage_data})
     return data, voltage
@@ -92,7 +82,6 @@ try:
     while True:
         # Read data
         data, current_voltage = read_data()
-        
         # Create an Altair chart
         chart = alt.Chart(data).mark_line().encode(
             x=alt.X('Time:Q', title='Time (s)'),
@@ -101,10 +90,8 @@ try:
             width=700,
             height=400
         )
-        
         # Update the Streamlit chart
         chart_placeholder.altair_chart(chart)
-        
         # Determine door/window status and color
         if current_voltage > 1:
             status = "Open"
@@ -112,7 +99,6 @@ try:
         else:
             status = "Closed"
             status_color = "#00FF00"  # Green
-        
         # Create a DataFrame to display the status in a table
         status_html = f"""
         <div style="display: flex; align-items: center;">
@@ -123,9 +109,7 @@ try:
             </div>
         </div>
         """
-        
         status_placeholder.markdown(status_html, unsafe_allow_html=True)
-        
         # Sleep for 1 second
         sleep(1)
 except KeyboardInterrupt:
