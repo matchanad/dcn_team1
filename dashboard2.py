@@ -56,7 +56,7 @@ try:
     # Function to read sensor data
     def read_sensor_data():
         Voltage = chan.voltage
-        State = "0" if digital_pin.value else "1"
+        State = "0" if digital_pin.value = 0 else "1"
         return Voltage, State
 
     try:
