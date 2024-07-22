@@ -36,7 +36,7 @@ try:
     # Function to simulate reading voltage and state
     def read_sensor_data():
         Voltage = random.uniform(0, 3.3)
-        State = "Open" if voltage > 1 else "Closed"  # '0' for Open and '1' for Closed
+        State = "Open" if Voltage > 1 else "Closed"  # '0' for Open and '1' for Closed
         return Voltage, State
 
     try:
