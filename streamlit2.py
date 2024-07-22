@@ -5,6 +5,7 @@ from time import sleep, time
 import streamlit as st
 import pandas as pd
 import altair as alt
+import random
 
 # Mocking the hardware-related components for environments without the required hardware
 class MockSPI:
@@ -21,6 +22,8 @@ class MockAnalogIn:
         self.voltage = 0.0
 
     def read_voltage(self):
+        # Simulate voltage reading with random values between 0 and 3.3V
+        self.voltage = random.uniform(0, 3.3)
         return self.voltage
 
 try:
@@ -78,7 +81,7 @@ def read_data():
     else:
         # Simulate voltage and digital value
         voltage = chan.read_voltage()
-        digital_value = 0  # Default to 0 since no hardware is available
+        digital_value = random.choice([0, 1])
 
     # Calculate elapsed time
     current_time = time() - start_time
