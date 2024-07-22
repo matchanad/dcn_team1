@@ -9,26 +9,42 @@ import spidev
 import RPi.GPIO as GPIO
 
 # Set up SPI bus
-spi = spidev.SpiDev()
-spi.open(0, 0)  # Open SPI bus 0, device (CS) 0
-spi.max_speed_hz = 1350000  # Set max speed
+try:
+    spi = spidev.SpiDev()
+    spi.open(0, 0)  # Open SPI bus 0, device (CS) 0
+    spi.max_speed_hz = 1350000  # Set max speed
+    print("SPI initialized successfully")
+except Exception as e:
+    print(f"Error initializing SPI: {e}")
 
 # Set up GPIO for digital input
-GPIO.setmode(GPIO.BCM)
-digital_pin = 6
-GPIO.setup(digital_pin, GPIO.IN)
+try:
+    GPIO.setmode(GPIO.BCM)
+    digital_pin = 6
+    GPIO.setup(digital_pin, GPIO.IN)
+    print("GPIO initialized successfully")
+except Exception as e:
+    print(f"Error initializing GPIO: {e}")
 
 def read_adc(channel):
     """Read ADC from the specified channel (0-7)"""
-    if channel < 0 or channel > 7:
+    try:
+        if channel < 0 or channel > 7:
+            return -1
+        r = spi.xfer2([1, (8 + channel) << 4, 0])
+        adc_out = ((r[1] & 3) << 8) + r[2]
+        return adc_out
+    except Exception as e:
+        print(f"Error reading ADC: {e}")
         return -1
-    r = spi.xfer2([1, (8 + channel) << 4, 0])
-    adc_out = ((r[1] & 3) << 8) + r[2]
-    return adc_out
 
 def convert_to_voltage(adc_value):
     """Convert the raw ADC value to a voltage (0-3.3V)"""
-    return adc_value * (3.3 / 1023.0)
+    try:
+        return adc_value * (3.3 / 1023.0)
+    except Exception as e:
+        print(f"Error converting to voltage: {e}")
+        return 0.0
 
 # Initialize lists to store time and voltage data
 time_data = []
@@ -44,35 +60,39 @@ status_placeholder = st.empty()
 
 # Function to read data and update plot
 def read_data():
-    # Get the current voltage
-    adc_value = read_adc(0)
-    voltage = convert_to_voltage(adc_value)
+    try:
+        # Get the current voltage
+        adc_value = read_adc(0)
+        voltage = convert_to_voltage(adc_value)
 
-    # Get the current state of the digital pin
-    digital_value = GPIO.input(digital_pin)
+        # Get the current state of the digital pin
+        digital_value = GPIO.input(digital_pin)
 
-    # Calculate elapsed time
-    current_time = time() - start_time
+        # Calculate elapsed time
+        current_time = time() - start_time
 
-    # Append the time and voltage data to the lists
-    time_data.append(current_time)
-    voltage_data.append(voltage)
+        # Append the time and voltage data to the lists
+        time_data.append(current_time)
+        voltage_data.append(voltage)
 
-    # Keep the last 100 data points
-    if len(time_data) > 100:
-        time_data.pop(0)
-        voltage_data.pop(0)
+        # Keep the last 100 data points
+        if len(time_data) > 100:
+            time_data.pop(0)
+            voltage_data.pop(0)
 
-    # Create a DataFrame with the time and voltage data
-    data = pd.DataFrame({'Time': time_data, 'Voltage': voltage_data})
-    return data, voltage, digital_value
+        # Create a DataFrame with the time and voltage data
+        data = pd.DataFrame({'Time': time_data, 'Voltage': voltage_data})
+        return data, voltage, digital_value
+    except Exception as e:
+        print(f"Error in read_data: {e}")
+        return pd.DataFrame({'Time': [], 'Voltage': []}), 0.0, 0
 
 # Read data and update plot in a loop
 try:
     while True:
         # Read data
         data, current_voltage, digital_value = read_data()
-        
+
         # Create an Altair chart
         chart = alt.Chart(data).mark_line().encode(
             x=alt.X('Time:Q', title='Time (s)'),
@@ -81,10 +101,10 @@ try:
             width=700,
             height=400
         )
-        
+
         # Update the Streamlit chart
         chart_placeholder.altair_chart(chart)
-        
+
         # Determine door/window status and color
         if digital_value == 1:
             status = "Open"
@@ -92,7 +112,7 @@ try:
         else:
             status = "Closed"
             status_color = "#00FF00"  # Green
-        
+
         # Create a DataFrame to display the status in a table
         status_html = f"""
         <div style="display: flex; align-items: center;">
@@ -103,9 +123,9 @@ try:
             </div>
         </div>
         """
-        
+
         status_placeholder.markdown(status_html, unsafe_allow_html=True)
-        
+
         # Sleep for 1 second
         sleep(1)
 except KeyboardInterrupt:
