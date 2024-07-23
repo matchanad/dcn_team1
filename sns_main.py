@@ -8,20 +8,16 @@ import board
 import adafruit_mcp3xxx.mcp3008 as MCP
 from adafruit_mcp3xxx.analog_in import AnalogIn
 from azure.iot.device import IoTHubDeviceClient, Message, ProvisioningDeviceClient, exceptions
-import os
 
 # Telegram bot token
-BOT_TOKEN = 'YOUR_BOT_TOKEN'
+BOT_TOKEN = '7310002513:AAEQeDpJbzX9pXu8NTY0O7YNEYFweNw2xZs'
 
 # Azure IoT Central information
-id_scope = "YOUR_ID_SCOPE"
-device_id = "YOUR_DEVICE_ID"
-primary_key = "YOUR_PRIMARY_KEY"
+id_scope = "0ne00CDBD95"
+device_id = "27yzuc90d6v"
+primary_key = "cBkkyw8/SDdwPygExhk8npwAPyHsqO0H7832Xx+XSR0="
 provisioning_host = "global.azure-devices-provisioning.net"
 template = "{\"Voltage\": %.2f, \"State\": \"%d\"}"
-
-# File to store registered chat IDs
-CHAT_ID_FILE = 'registered_chat_ids.txt'
 
 # Initialize the bot
 bot = telepot.Bot(BOT_TOKEN)
@@ -34,6 +30,7 @@ calibrated_voltage = None
 alert_active = False
 prev_Voltage, prev_State = None, None
 registered_chat_ids = []
+pending_registrations = {}
 
 # States for the state machine
 STATE_IDLE = "idle"
@@ -41,7 +38,6 @@ STATE_SETUP_INSTALLATION = "setup_installation"
 STATE_SETUP_CALIBRATION = "setup_calibration"
 STATE_CHECK_BLACK_SURFACE = "check_black_surface"
 STATE_ALERT = "alert"
-STATE_REGISTER = "register"
 
 # Set up SPI and MCP3008
 spi = busio.SPI(clock=board.SCK, MISO=board.MISO, MOSI=board.MOSI)
@@ -87,27 +83,25 @@ except Exception as e:
     print(f"An unexpected error occurred: {e}")
     exit()
 
-def load_registered_chat_ids():
-    global registered_chat_ids
-    if os.path.exists(CHAT_ID_FILE):
-        with open(CHAT_ID_FILE, 'r') as f:
-            registered_chat_ids = [line.strip() for line in f]
-    else:
-        registered_chat_ids = []
-
-def save_registered_chat_ids():
-    global registered_chat_ids
-    with open(CHAT_ID_FILE, 'w') as f:
-        for chat_id in registered_chat_ids:
-            f.write(f"{chat_id}\n")
-
-def is_chat_id_registered(chat_id):
-    global registered_chat_ids
-    return chat_id in registered_chat_ids
-
 def create_keyboard(options):
     keyboard = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text=text, callback_data=text)] for text in options])
     return keyboard
+
+def load_registered_chat_ids():
+    global registered_chat_ids
+    try:
+        with open('registered_chat_ids.txt', 'r') as f:
+            registered_chat_ids = [int(line.strip()) for line in f if line.strip()]
+    except FileNotFoundError:
+        registered_chat_ids = []
+
+def save_registered_chat_ids():
+    with open('registered_chat_ids.txt', 'w') as f:
+        for chat_id in registered_chat_ids:
+            f.write(f"{chat_id}\n")
+
+def is_registered(chat_id):
+    return chat_id in registered_chat_ids
 
 def on_chat_message(msg):
     global current_chat_id, calibrated_voltage, sensor_active, alert_active
@@ -118,14 +112,36 @@ def on_chat_message(msg):
     current_chat_id = chat_id
     print(f'Received command: {command}')
 
-    if not is_chat_id_registered(chat_id):
-        bot.sendMessage(chat_id, 'You are not registered. Please use /register to register your chat ID.')
-        return
+    if command == '/register':
+        handle_registration(chat_id)
+    elif is_registered(chat_id):
+        handle_registered_commands(chat_id, command)
+    else:
+        bot.sendMessage(chat_id, "You are not registered. Please use /register to register.")
+
+def handle_registration(chat_id):
+    global registered_chat_ids, pending_registrations
+
+    if not registered_chat_ids:
+        registered_chat_ids.append(chat_id)
+        save_registered_chat_ids()
+        bot.sendMessage(chat_id, "You have been registered as the first user.")
+    elif chat_id in registered_chat_ids:
+        bot.sendMessage(chat_id, "You are already registered.")
+    else:
+        admin_chat_id = registered_chat_ids[0]
+        pending_registrations[chat_id] = True
+        keyboard = create_keyboard(['Approve', 'Deny'])
+        bot.sendMessage(admin_chat_id, f"New registration request from {chat_id}. Do you approve?", reply_markup=keyboard)
+        bot.sendMessage(chat_id, "Your registration request has been sent to the admin for approval.")
+
+def handle_registered_commands(chat_id, command):
+    global current_chat_id, calibrated_voltage, sensor_active, alert_active
 
     current_state = chat_states.get(chat_id, STATE_IDLE)
 
-    if command == '/register':
-        register_chat_id(chat_id)
+    if command == '/view_dashboard':
+        bot.sendMessage(chat_id, 'You can view the live sensor data at: http://tcrt5000.azureiotcentral.com')
         return
 
     if current_state == STATE_ALERT:
@@ -182,11 +198,29 @@ def on_callback_query(msg):
     command = query_data
     chat_id = msg['message']['chat']['id']
 
-    if not is_chat_id_registered(chat_id):
-        bot.sendMessage(chat_id, 'You are not registered. Please use /register to register your chat ID.')
-        return
+    if chat_id == registered_chat_ids[0] and command in ['Approve', 'Deny']:
+        handle_registration_approval(chat_id, command)
+    elif is_registered(chat_id):
+        handle_callback_query(chat_id, command)
+    else:
+        bot.answerCallbackQuery(query_id, text="You are not registered.")
 
-    handle_callback_query(chat_id, command)
+def handle_registration_approval(admin_chat_id, decision):
+    global registered_chat_ids, pending_registrations
+
+    if pending_registrations:
+        new_chat_id = list(pending_registrations.keys())[0]
+        if decision == 'Approve':
+            registered_chat_ids.append(new_chat_id)
+            save_registered_chat_ids()
+            bot.sendMessage(new_chat_id, "Your registration has been approved.")
+            bot.sendMessage(admin_chat_id, f"Registration for {new_chat_id} has been approved.")
+        else:
+            bot.sendMessage(new_chat_id, "Your registration has been denied.")
+            bot.sendMessage(admin_chat_id, f"Registration for {new_chat_id} has been denied.")
+        del pending_registrations[new_chat_id]
+    else:
+        bot.sendMessage(admin_chat_id, "No pending registration requests.")
 
 def handle_callback_query(chat_id, command):
     global current_chat_id, calibrated_voltage, sensor_active, alert_active
@@ -245,31 +279,6 @@ def handle_callback_query(chat_id, command):
             bot.sendMessage(chat_id, 'The sensor is not detecting a closed door/window. Please check the installation and try the setup again using /setup_sensor.')
             chat_states[chat_id] = STATE_IDLE
 
-def register_chat_id(chat_id):
-    global registered_chat_ids
-    if chat_id in registered_chat_ids:
-        bot.sendMessage(chat_id, 'Your chat ID is already registered.')
-        return
-
-    admin_chat_id = registered_chat_ids[0] if registered_chat_ids else None
-
-    if admin_chat_id:
-        keyboard = create_keyboard(['Yes', 'No'])
-        bot.sendMessage(admin_chat_id, f'Chat ID {chat_id} is requesting registration. Approve?', reply_markup=keyboard)
-        chat_states[admin_chat_id] = STATE_REGISTER
-    else:
-        registered_chat_ids.append(chat_id)
-        save_registered_chat_ids()
-        bot.sendMessage(chat_id, 'You have been registered as the first chat ID. No need for approval.')
-        chat_states[chat_id] = STATE_IDLE
-
-def approve_registration(admin_chat_id, new_chat_id):
-    global registered_chat_ids
-    registered_chat_ids.append(new_chat_id)
-    save_registered_chat_ids()
-    bot.sendMessage(admin_chat_id, f'Chat ID {new_chat_id} has been registered.')
-    bot.sendMessage(new_chat_id, 'You have been registered as a chat ID.')
-
 def calibrate_sensor(chat_id):
     global calibrated_voltage
 
@@ -323,6 +332,8 @@ def send_alert():
 def main():
     load_registered_chat_ids()
     MessageLoop(bot, {'chat': on_chat_message, 'callback_query': on_callback_query}).run_as_thread()
+
+    print("Bot is listening...")
 
     while True:
         try:
