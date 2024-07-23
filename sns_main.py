@@ -8,6 +8,7 @@ import board
 import adafruit_mcp3xxx.mcp3008 as MCP
 from adafruit_mcp3xxx.analog_in import AnalogIn
 from azure.iot.device import IoTHubDeviceClient, Message, ProvisioningDeviceClient, exceptions
+import os
 
 # Telegram bot token
 BOT_TOKEN = '7310002513:AAEQeDpJbzX9pXu8NTY0O7YNEYFweNw2xZs'
@@ -18,6 +19,9 @@ device_id = "27yzuc90d6v"
 primary_key = "cBkkyw8/SDdwPygExhk8npwAPyHsqO0H7832Xx+XSR0="
 provisioning_host = "global.azure-devices-provisioning.net"
 template = "{\"Voltage\": %.2f, \"State\": \"%d\"}"
+
+# File to store registered chat IDs
+CHAT_ID_FILE = 'registered_chat_ids.txt'
 
 # Initialize the bot
 bot = telepot.Bot(BOT_TOKEN)
@@ -36,6 +40,7 @@ STATE_SETUP_INSTALLATION = "setup_installation"
 STATE_SETUP_CALIBRATION = "setup_calibration"
 STATE_CHECK_BLACK_SURFACE = "check_black_surface"
 STATE_ALERT = "alert"
+STATE_REGISTER = "register"
 
 # Set up SPI and MCP3008
 spi = busio.SPI(clock=board.SCK, MISO=board.MISO, MOSI=board.MOSI)
@@ -81,6 +86,20 @@ except Exception as e:
     print(f"An unexpected error occurred: {e}")
     exit()
 
+def load_registered_chat_ids():
+    if os.path.exists(CHAT_ID_FILE):
+        with open(CHAT_ID_FILE, 'r') as f:
+            return set(line.strip() for line in f)
+    return set()
+
+def save_registered_chat_ids(chat_ids):
+    with open(CHAT_ID_FILE, 'w') as f:
+        for chat_id in chat_ids:
+            f.write(f"{chat_id}\n")
+
+def is_chat_id_registered(chat_id):
+    return chat_id in load_registered_chat_ids()
+
 def create_keyboard(options):
     keyboard = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text=text, callback_data=text)] for text in options])
     return keyboard
@@ -94,10 +113,14 @@ def on_chat_message(msg):
     current_chat_id = chat_id
     print(f'Received command: {command}')
 
+    if not is_chat_id_registered(chat_id):
+        bot.sendMessage(chat_id, 'You are not registered. Please use /register to register your chat ID.')
+        return
+
     current_state = chat_states.get(chat_id, STATE_IDLE)
 
-    if command == '/view_dashboard':
-        bot.sendMessage(chat_id, 'You can view the live sensor data at: http://tcrt5000.azureiotcentral.com')
+    if command == '/register':
+        register_chat_id(chat_id)
         return
 
     if current_state == STATE_ALERT:
@@ -153,6 +176,10 @@ def on_callback_query(msg):
     query_id, from_id, query_data = telepot.glance(msg, flavor='callback_query')
     command = query_data
     chat_id = msg['message']['chat']['id']
+
+    if not is_chat_id_registered(chat_id):
+        bot.sendMessage(chat_id, 'You are not registered. Please use /register to register your chat ID.')
+        return
 
     handle_callback_query(chat_id, command)
 
@@ -212,6 +239,32 @@ def handle_callback_query(chat_id, command):
         else:
             bot.sendMessage(chat_id, 'The sensor is not detecting a closed door/window. Please check the installation and try the setup again using /setup_sensor.')
             chat_states[chat_id] = STATE_IDLE
+
+def register_chat_id(chat_id):
+    registered_chat_ids = load_registered_chat_ids()
+
+    if chat_id in registered_chat_ids:
+        bot.sendMessage(chat_id, 'Your chat ID is already registered.')
+        return
+
+    admin_chat_id = registered_chat_ids.pop() if registered_chat_ids else None
+
+    if admin_chat_id:
+        keyboard = create_keyboard(['Yes', 'No'])
+        bot.sendMessage(admin_chat_id, f'Chat ID {chat_id} is requesting registration. Approve?', reply_markup=keyboard)
+        chat_states[admin_chat_id] = STATE_REGISTER
+    else:
+        registered_chat_ids.add(chat_id)
+        save_registered_chat_ids(registered_chat_ids)
+        bot.sendMessage(chat_id, 'You have been registered as the first chat ID. No need for approval.')
+        chat_states[chat_id] = STATE_IDLE
+
+def approve_registration(admin_chat_id, new_chat_id):
+    registered_chat_ids = load_registered_chat_ids()
+    registered_chat_ids.add(new_chat_id)
+    save_registered_chat_ids(registered_chat_ids)
+    bot.sendMessage(admin_chat_id, f'Chat ID {new_chat_id} has been registered.')
+    bot.sendMessage(new_chat_id, 'You have been registered as a chat ID.')
 
 def calibrate_sensor(chat_id):
     global calibrated_voltage
