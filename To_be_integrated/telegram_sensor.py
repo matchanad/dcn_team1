@@ -1,7 +1,6 @@
 import time
 from telegram import Bot, Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.error import TelegramError
-from threading import Thread, Event
 import busio
 import digitalio
 import board
@@ -15,11 +14,11 @@ BOT_TOKEN = '7310002513:AAEQeDpJbzX9pXu8NTY0O7YNEYFweNw2xZs'
 bot = Bot(token=BOT_TOKEN)
 
 # Global variables
-sensor_active = Event()
+sensor_active = False
 chat_states = {}
 current_chat_id = None
 calibrated_voltage = None
-alert_active = Event()
+alert_active = False
 
 # States for the state machine
 STATE_IDLE = "idle"
@@ -39,7 +38,7 @@ def create_keyboard(options):
     return InlineKeyboardMarkup(keyboard)
 
 def handle(update: Update) -> None:
-    global current_chat_id, calibrated_voltage
+    global current_chat_id, calibrated_voltage, sensor_active, alert_active
 
     try:
         if update.callback_query:
@@ -63,8 +62,8 @@ def handle(update: Update) -> None:
 
         if current_state == STATE_ALERT:
             if command.lower() == 'safe':
-                alert_active.clear()
-                sensor_active.clear()
+                alert_active = False
+                sensor_active = False
                 chat_states[chat_id] = STATE_IDLE
                 bot.send_message(chat_id=chat_id, text='Alert cancelled. Sensor protection stopped.')
             else:
@@ -75,10 +74,10 @@ def handle(update: Update) -> None:
                 if calibrated_voltage is None:
                     bot.send_message(chat_id=chat_id, text='Please set up the sensor first using /setup_sensor.')
                 else:
-                    sensor_active.set()
+                    sensor_active = True
                     bot.send_message(chat_id=chat_id, text='Protection started.')
             elif command == '/end_protect':
-                sensor_active.clear()
+                sensor_active = False
                 bot.send_message(chat_id=chat_id, text='Protection ended.')
             elif command == '/setup_sensor':
                 chat_states[chat_id] = STATE_SETUP_INSTALLATION
@@ -132,24 +131,24 @@ def calibrate_sensor(chat_id):
     chat_states[chat_id] = STATE_CHECK_BLACK_SURFACE
 
 def monitor_sensor():
-    global current_chat_id, calibrated_voltage
+    global current_chat_id, calibrated_voltage, sensor_active, alert_active
 
-    while True:
-        if sensor_active.is_set() and calibrated_voltage is not None:
-            current_voltage = chan.voltage
+    if sensor_active and calibrated_voltage is not None:
+        current_voltage = chan.voltage
 
-            if current_voltage >= 1.0 and not alert_active.is_set():  # Break-in detected if voltage is 1.0V or more
-                print(f"Break-in detected! Current voltage: {current_voltage:.2f}V")
-                if current_chat_id is not None:
-                    alert_active.set()
-                    chat_states[current_chat_id] = STATE_ALERT
-                    send_alert()
-            else:
-                print(f"Secure. Current voltage: {current_voltage:.2f}V")
-        time.sleep(0.01)
+        if current_voltage >= 1.0 and not alert_active:  # Break-in detected if voltage is 1.0V or more
+            print(f"Break-in detected! Current voltage: {current_voltage:.2f}V")
+            if current_chat_id is not None:
+                alert_active = True
+                chat_states[current_chat_id] = STATE_ALERT
+                send_alert()
+        else:
+            print(f"Secure. Current voltage: {current_voltage:.2f}V")
 
 def send_alert():
-    while alert_active.is_set():
+    global alert_active
+
+    if alert_active:
         try:
             keyboard = create_keyboard(['Safe'])
             bot.send_message(chat_id=current_chat_id, text='Alert! Break in detected! Tap "Safe" if the situation is under control.', reply_markup=keyboard)
@@ -158,14 +157,6 @@ def send_alert():
         time.sleep(2)  # Wait for 2 seconds before sending the next alert
 
 def main():
-    sensor_thread = Thread(target=monitor_sensor)
-    sensor_thread.daemon = True
-    sensor_thread.start()
-
-    alert_thread = Thread(target=send_alert)
-    alert_thread.daemon = True
-    alert_thread.start()
-
     offset = None
 
     while True:
@@ -175,6 +166,8 @@ def main():
             for update in updates:
                 offset = update.update_id + 1
                 handle(update)
+
+            monitor_sensor()
 
         except TelegramError as e:
             print(f"TelegramError: {e}")
