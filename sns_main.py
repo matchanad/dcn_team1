@@ -11,12 +11,12 @@ from azure.iot.device import IoTHubDeviceClient, Message, ProvisioningDeviceClie
 import os
 
 # Telegram bot token
-BOT_TOKEN = '7310002513:AAEQeDpJbzX9pXu8NTY0O7YNEYFweNw2xZs'
+BOT_TOKEN = 'YOUR_BOT_TOKEN'
 
 # Azure IoT Central information
-id_scope = "0ne00CDBD95"
-device_id = "27yzuc90d6v"
-primary_key = "cBkkyw8/SDdwPygExhk8npwAPyHsqO0H7832Xx+XSR0="
+id_scope = "YOUR_ID_SCOPE"
+device_id = "YOUR_DEVICE_ID"
+primary_key = "YOUR_PRIMARY_KEY"
 provisioning_host = "global.azure-devices-provisioning.net"
 template = "{\"Voltage\": %.2f, \"State\": \"%d\"}"
 
@@ -33,6 +33,7 @@ current_chat_id = None
 calibrated_voltage = None
 alert_active = False
 prev_Voltage, prev_State = None, None
+registered_chat_ids = []
 
 # States for the state machine
 STATE_IDLE = "idle"
@@ -87,18 +88,22 @@ except Exception as e:
     exit()
 
 def load_registered_chat_ids():
+    global registered_chat_ids
     if os.path.exists(CHAT_ID_FILE):
         with open(CHAT_ID_FILE, 'r') as f:
-            return set(line.strip() for line in f)
-    return set()
+            registered_chat_ids = [line.strip() for line in f]
+    else:
+        registered_chat_ids = []
 
-def save_registered_chat_ids(chat_ids):
+def save_registered_chat_ids():
+    global registered_chat_ids
     with open(CHAT_ID_FILE, 'w') as f:
-        for chat_id in chat_ids:
+        for chat_id in registered_chat_ids:
             f.write(f"{chat_id}\n")
 
 def is_chat_id_registered(chat_id):
-    return chat_id in load_registered_chat_ids()
+    global registered_chat_ids
+    return chat_id in registered_chat_ids
 
 def create_keyboard(options):
     keyboard = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text=text, callback_data=text)] for text in options])
@@ -241,28 +246,27 @@ def handle_callback_query(chat_id, command):
             chat_states[chat_id] = STATE_IDLE
 
 def register_chat_id(chat_id):
-    registered_chat_ids = load_registered_chat_ids()
-
+    global registered_chat_ids
     if chat_id in registered_chat_ids:
         bot.sendMessage(chat_id, 'Your chat ID is already registered.')
         return
 
-    admin_chat_id = registered_chat_ids.pop() if registered_chat_ids else None
+    admin_chat_id = registered_chat_ids[0] if registered_chat_ids else None
 
     if admin_chat_id:
         keyboard = create_keyboard(['Yes', 'No'])
         bot.sendMessage(admin_chat_id, f'Chat ID {chat_id} is requesting registration. Approve?', reply_markup=keyboard)
         chat_states[admin_chat_id] = STATE_REGISTER
     else:
-        registered_chat_ids.add(chat_id)
-        save_registered_chat_ids(registered_chat_ids)
+        registered_chat_ids.append(chat_id)
+        save_registered_chat_ids()
         bot.sendMessage(chat_id, 'You have been registered as the first chat ID. No need for approval.')
         chat_states[chat_id] = STATE_IDLE
 
 def approve_registration(admin_chat_id, new_chat_id):
-    registered_chat_ids = load_registered_chat_ids()
-    registered_chat_ids.add(new_chat_id)
-    save_registered_chat_ids(registered_chat_ids)
+    global registered_chat_ids
+    registered_chat_ids.append(new_chat_id)
+    save_registered_chat_ids()
     bot.sendMessage(admin_chat_id, f'Chat ID {new_chat_id} has been registered.')
     bot.sendMessage(new_chat_id, 'You have been registered as a chat ID.')
 
@@ -317,6 +321,7 @@ def send_alert():
         time.sleep(2)  # Wait for 2 seconds before sending the next alert
 
 def main():
+    load_registered_chat_ids()
     MessageLoop(bot, {'chat': on_chat_message, 'callback_query': on_callback_query}).run_as_thread()
 
     while True:
