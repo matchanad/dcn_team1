@@ -89,9 +89,9 @@ def create_keyboard(options):
 def load_registered_chat_ids():
     try:
         with open('registered_chat_ids.txt', 'r') as file:
-            chat_ids = {line.strip() for line in file}
+            chat_ids = [line.strip() for line in file]
     except FileNotFoundError:
-        chat_ids = set()
+        chat_ids = []
     return chat_ids
 
 def save_registered_chat_ids(chat_ids):
@@ -109,7 +109,7 @@ def on_chat_message(msg):
     print(f'Received command: {command}')
 
     registered_chat_ids = load_registered_chat_ids()
-    
+
     if command == '/register':
         register_chat_id(chat_id, registered_chat_ids)
         return
@@ -179,20 +179,20 @@ def register_chat_id(chat_id, registered_chat_ids):
         return
 
     if not registered_chat_ids:
-        registered_chat_ids.add(chat_id)
+        registered_chat_ids.append(chat_id)
         save_registered_chat_ids(registered_chat_ids)
         bot.sendMessage(chat_id, 'You have been registered as the first chat ID. No need for approval.')
         chat_states[chat_id] = STATE_IDLE
     else:
-        admin_chat_id = next(iter(registered_chat_ids))
+        admin_chat_id = registered_chat_ids[0]
         keyboard = create_keyboard(['Approve', 'Reject'])
         bot.sendMessage(admin_chat_id, f'Chat ID {chat_id} is requesting registration. Approve?', reply_markup=keyboard)
-        chat_states[admin_chat_id] = STATE_REGISTER
+        chat_states[admin_chat_id] = (STATE_REGISTER, chat_id)
         chat_states[chat_id] = STATE_REGISTER
 
 def approve_registration(admin_chat_id, new_chat_id):
     registered_chat_ids = load_registered_chat_ids()
-    registered_chat_ids.add(new_chat_id)
+    registered_chat_ids.append(new_chat_id)
     save_registered_chat_ids(registered_chat_ids)
     bot.sendMessage(admin_chat_id, f'Chat ID {new_chat_id} has been registered.')
     bot.sendMessage(new_chat_id, 'You have been registered as a chat ID.')
