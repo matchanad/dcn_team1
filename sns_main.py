@@ -8,7 +8,6 @@ import board
 import adafruit_mcp3xxx.mcp3008 as MCP
 from adafruit_mcp3xxx.analog_in import AnalogIn
 from azure.iot.device import IoTHubDeviceClient, Message, ProvisioningDeviceClient, exceptions
-import os
 
 # Telegram bot token
 BOT_TOKEN = '7310002513:AAEQeDpJbzX9pXu8NTY0O7YNEYFweNw2xZs'
@@ -19,9 +18,6 @@ device_id = "27yzuc90d6v"
 primary_key = "cBkkyw8/SDdwPygExhk8npwAPyHsqO0H7832Xx+XSR0="
 provisioning_host = "global.azure-devices-provisioning.net"
 template = "{\"Voltage\": %.2f, \"State\": \"%d\"}"
-
-# File to store registered chat IDs
-CHAT_ID_FILE = 'registered_chat_ids.txt'
 
 # Initialize the bot
 bot = telepot.Bot(BOT_TOKEN)
@@ -86,23 +82,22 @@ except Exception as e:
     print(f"An unexpected error occurred: {e}")
     exit()
 
-def load_registered_chat_ids():
-    if os.path.exists(CHAT_ID_FILE):
-        with open(CHAT_ID_FILE, 'r') as f:
-            return set(line.strip() for line in f)
-    return set()
-
-def save_registered_chat_ids(chat_ids):
-    with open(CHAT_ID_FILE, 'w') as f:
-        for chat_id in chat_ids:
-            f.write(f"{chat_id}\n")
-
-def is_chat_id_registered(chat_id):
-    return chat_id in load_registered_chat_ids()
-
 def create_keyboard(options):
     keyboard = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text=text, callback_data=text)] for text in options])
     return keyboard
+
+def load_registered_chat_ids():
+    try:
+        with open('registered_chat_ids.txt', 'r') as file:
+            chat_ids = {line.strip() for line in file}
+    except FileNotFoundError:
+        chat_ids = set()
+    return chat_ids
+
+def save_registered_chat_ids(chat_ids):
+    with open('registered_chat_ids.txt', 'w') as file:
+        for chat_id in chat_ids:
+            file.write(f"{chat_id}\n")
 
 def on_chat_message(msg):
     global current_chat_id, calibrated_voltage, sensor_active, alert_active
@@ -113,151 +108,87 @@ def on_chat_message(msg):
     current_chat_id = chat_id
     print(f'Received command: {command}')
 
-    if not is_chat_id_registered(chat_id):
-        bot.sendMessage(chat_id, 'You are not registered. Please use /register to register your chat ID.')
-        return
-
-    current_state = chat_states.get(chat_id, STATE_IDLE)
-
-    if command == '/register':
-        register_chat_id(chat_id)
-        return
-
-    if current_state == STATE_ALERT:
-        if command.lower() == 'safe':
-            alert_active = False
-            sensor_active = False
-            chat_states[chat_id] = STATE_IDLE
-            bot.sendMessage(chat_id, 'Alert cancelled. Sensor protection stopped.')
-        else:
-            keyboard = create_keyboard(['Safe'])
-            bot.sendMessage(chat_id, 'Break-in alert is still active! Tap "Safe" if the situation is under control.', reply_markup=keyboard)
-    elif current_state == STATE_IDLE:
-        if command == '/start_protect':
-            if calibrated_voltage is None:
-                bot.sendMessage(chat_id, 'Please set up the sensor first using /setup_sensor.')
-            else:
-                sensor_active = True
-                bot.sendMessage(chat_id, 'Protection started.')
-        elif command == '/end_protect':
-            sensor_active = False
-            bot.sendMessage(chat_id, 'Protection ended.')
-        elif command == '/setup_sensor':
-            chat_states[chat_id] = STATE_SETUP_INSTALLATION
-            keyboard = create_keyboard(['Yes', 'No'])
-            bot.sendMessage(chat_id, 'Have you installed the sensor at the desired location?', reply_markup=keyboard)
-
-    elif current_state == STATE_SETUP_INSTALLATION:
-        if command == 'Yes':
-            chat_states[chat_id] = STATE_SETUP_CALIBRATION
-            keyboard = create_keyboard(['Ready'])
-            bot.sendMessage(chat_id, 'Please close the door/window, then tap "Ready" to start calibration.', reply_markup=keyboard)
-        else:
-            keyboard = create_keyboard(['Yes'])
-            bot.sendMessage(chat_id, 'Please install the sensor at the desired location and tap "Yes" when done.', reply_markup=keyboard)
-
-    elif current_state == STATE_SETUP_CALIBRATION:
-        if command == 'Ready':
-            calibrate_sensor(chat_id)
-        else:
-            keyboard = create_keyboard(['Ready'])
-            bot.sendMessage(chat_id, 'Please close the door/window, then tap "Ready" to start calibration.', reply_markup=keyboard)
-
-    elif current_state == STATE_CHECK_BLACK_SURFACE:
-        if command == 'Yes':
-            keyboard = create_keyboard(['Done'])
-            bot.sendMessage(chat_id, 'Please place a reflective surface or any non-black material opposite to the sensor. This could be a small piece of white tape, aluminum foil, or any light-colored material. Tap "Done" when finished.', reply_markup=keyboard)
-            chat_states[chat_id] = STATE_SETUP_CALIBRATION
-        else:
-            bot.sendMessage(chat_id, 'The sensor is not detecting a closed door/window. Please check the installation and try the setup again using /setup_sensor.')
-            chat_states[chat_id] = STATE_IDLE
-
-def on_callback_query(msg):
-    query_id, from_id, query_data = telepot.glance(msg, flavor='callback_query')
-    command = query_data
-    chat_id = msg['message']['chat']['id']
-
-    if not is_chat_id_registered(chat_id):
-        bot.sendMessage(chat_id, 'You are not registered. Please use /register to register your chat ID.')
-        return
-
-    handle_callback_query(chat_id, command)
-
-def handle_callback_query(chat_id, command):
-    global current_chat_id, calibrated_voltage, sensor_active, alert_active
-
-    current_chat_id = chat_id
-    print(f'Received command: {command}')
-
-    current_state = chat_states.get(chat_id, STATE_IDLE)
-
-    if current_state == STATE_ALERT:
-        if command.lower() == 'safe':
-            alert_active = False
-            sensor_active = False
-            chat_states[chat_id] = STATE_IDLE
-            bot.sendMessage(chat_id, 'Alert cancelled. Sensor protection stopped.')
-        else:
-            keyboard = create_keyboard(['Safe'])
-            bot.sendMessage(chat_id, 'Break-in alert is still active! Tap "Safe" if the situation is under control.', reply_markup=keyboard)
-    elif current_state == STATE_IDLE:
-        if command == '/start_protect':
-            if calibrated_voltage is None:
-                bot.sendMessage(chat_id, 'Please set up the sensor first using /setup_sensor.')
-            else:
-                sensor_active = True
-                bot.sendMessage(chat_id, 'Protection started.')
-        elif command == '/end_protect':
-            sensor_active = False
-            bot.sendMessage(chat_id, 'Protection ended.')
-        elif command == '/setup_sensor':
-            chat_states[chat_id] = STATE_SETUP_INSTALLATION
-            keyboard = create_keyboard(['Yes', 'No'])
-            bot.sendMessage(chat_id, 'Have you installed the sensor at the desired location?', reply_markup=keyboard)
-
-    elif current_state == STATE_SETUP_INSTALLATION:
-        if command == 'Yes':
-            chat_states[chat_id] = STATE_SETUP_CALIBRATION
-            keyboard = create_keyboard(['Ready'])
-            bot.sendMessage(chat_id, 'Please close the door/window, then tap "Ready" to start calibration.', reply_markup=keyboard)
-        else:
-            keyboard = create_keyboard(['Yes'])
-            bot.sendMessage(chat_id, 'Please install the sensor at the desired location and tap "Yes" when done.', reply_markup=keyboard)
-
-    elif current_state == STATE_SETUP_CALIBRATION:
-        if command == 'Ready':
-            calibrate_sensor(chat_id)
-        else:
-            keyboard = create_keyboard(['Ready'])
-            bot.sendMessage(chat_id, 'Please close the door/window, then tap "Ready" to start calibration.', reply_markup=keyboard)
-
-    elif current_state == STATE_CHECK_BLACK_SURFACE:
-        if command == 'Yes':
-            keyboard = create_keyboard(['Done'])
-            bot.sendMessage(chat_id, 'Please place a reflective surface or any non-black material opposite to the sensor. This could be a small piece of white tape, aluminum foil, or any light-colored material. Tap "Done" when finished.', reply_markup=keyboard)
-            chat_states[chat_id] = STATE_SETUP_CALIBRATION
-        else:
-            bot.sendMessage(chat_id, 'The sensor is not detecting a closed door/window. Please check the installation and try the setup again using /setup_sensor.')
-            chat_states[chat_id] = STATE_IDLE
-
-def register_chat_id(chat_id):
     registered_chat_ids = load_registered_chat_ids()
+    
+    if command == '/register':
+        register_chat_id(chat_id, registered_chat_ids)
+        return
+    
+    if chat_id not in registered_chat_ids:
+        bot.sendMessage(chat_id, 'You are not registered. Use /register to register your chat ID.')
+        return
 
+    current_state = chat_states.get(chat_id, STATE_IDLE)
+
+    if command == '/view_dashboard':
+        bot.sendMessage(chat_id, 'You can view the live sensor data at: http://tcrt5000.azureiotcentral.com')
+        return
+
+    if current_state == STATE_ALERT:
+        if command.lower() == 'safe':
+            alert_active = False
+            sensor_active = False
+            chat_states[chat_id] = STATE_IDLE
+            bot.sendMessage(chat_id, 'Alert cancelled. Sensor protection stopped.')
+        else:
+            keyboard = create_keyboard(['Safe'])
+            bot.sendMessage(chat_id, 'Break-in alert is still active! Tap "Safe" if the situation is under control.', reply_markup=keyboard)
+    elif current_state == STATE_IDLE:
+        if command == '/start_protect':
+            if calibrated_voltage is None:
+                bot.sendMessage(chat_id, 'Please set up the sensor first using /setup_sensor.')
+            else:
+                sensor_active = True
+                bot.sendMessage(chat_id, 'Protection started.')
+        elif command == '/end_protect':
+            sensor_active = False
+            bot.sendMessage(chat_id, 'Protection ended.')
+        elif command == '/setup_sensor':
+            chat_states[chat_id] = STATE_SETUP_INSTALLATION
+            keyboard = create_keyboard(['Yes', 'No'])
+            bot.sendMessage(chat_id, 'Have you installed the sensor at the desired location?', reply_markup=keyboard)
+
+    elif current_state == STATE_SETUP_INSTALLATION:
+        if command == 'Yes':
+            chat_states[chat_id] = STATE_SETUP_CALIBRATION
+            keyboard = create_keyboard(['Ready'])
+            bot.sendMessage(chat_id, 'Please close the door/window, then tap "Ready" to start calibration.', reply_markup=keyboard)
+        else:
+            keyboard = create_keyboard(['Yes'])
+            bot.sendMessage(chat_id, 'Please install the sensor at the desired location and tap "Yes" when done.', reply_markup=keyboard)
+
+    elif current_state == STATE_SETUP_CALIBRATION:
+        if command == 'Ready':
+            calibrate_sensor(chat_id)
+        else:
+            keyboard = create_keyboard(['Ready'])
+            bot.sendMessage(chat_id, 'Please close the door/window, then tap "Ready" to start calibration.', reply_markup=keyboard)
+
+    elif current_state == STATE_CHECK_BLACK_SURFACE:
+        if command == 'Yes':
+            keyboard = create_keyboard(['Done'])
+            bot.sendMessage(chat_id, 'Please place a reflective surface or any non-black material opposite to the sensor. This could be a small piece of white tape, aluminum foil, or any light-colored material. Tap "Done" when finished.', reply_markup=keyboard)
+            chat_states[chat_id] = STATE_SETUP_CALIBRATION
+        else:
+            bot.sendMessage(chat_id, 'The sensor is not detecting a closed door/window. Please check the installation and try the setup again using /setup_sensor.')
+            chat_states[chat_id] = STATE_IDLE
+
+def register_chat_id(chat_id, registered_chat_ids):
     if chat_id in registered_chat_ids:
         bot.sendMessage(chat_id, 'Your chat ID is already registered.')
         return
 
-    admin_chat_id = registered_chat_ids.pop() if registered_chat_ids else None
-
-    if admin_chat_id:
-        keyboard = create_keyboard(['Yes', 'No'])
-        bot.sendMessage(admin_chat_id, f'Chat ID {chat_id} is requesting registration. Approve?', reply_markup=keyboard)
-        chat_states[admin_chat_id] = STATE_REGISTER
-    else:
+    if not registered_chat_ids:
         registered_chat_ids.add(chat_id)
         save_registered_chat_ids(registered_chat_ids)
         bot.sendMessage(chat_id, 'You have been registered as the first chat ID. No need for approval.')
         chat_states[chat_id] = STATE_IDLE
+    else:
+        admin_chat_id = next(iter(registered_chat_ids))
+        keyboard = create_keyboard(['Approve', 'Reject'])
+        bot.sendMessage(admin_chat_id, f'Chat ID {chat_id} is requesting registration. Approve?', reply_markup=keyboard)
+        chat_states[admin_chat_id] = STATE_REGISTER
+        chat_states[chat_id] = STATE_REGISTER
 
 def approve_registration(admin_chat_id, new_chat_id):
     registered_chat_ids = load_registered_chat_ids()
@@ -315,6 +246,77 @@ def send_alert():
         except telepot.exception.TelegramError as e:
             print(f"Error sending alert: {e}")
         time.sleep(2)  # Wait for 2 seconds before sending the next alert
+
+def on_callback_query(msg):
+    query_id, from_id, query_data = telepot.glance(msg, flavor='callback_query')
+    command = query_data
+    chat_id = msg['message']['chat']['id']
+
+    if chat_states.get(chat_id) == STATE_REGISTER:
+        if command == 'Approve':
+            approve_registration(next(iter(load_registered_chat_ids())), chat_id)
+        elif command == 'Reject':
+            bot.sendMessage(chat_id, 'Your registration request has been rejected.')
+        chat_states[chat_id] = STATE_IDLE
+    else:
+        handle_callback_query(chat_id, command)
+
+def handle_callback_query(chat_id, command):
+    global current_chat_id, calibrated_voltage, sensor_active, alert_active
+
+    current_chat_id = chat_id
+    print(f'Received command: {command}')
+
+    current_state = chat_states.get(chat_id, STATE_IDLE)
+
+    if current_state == STATE_ALERT:
+        if command.lower() == 'safe':
+            alert_active = False
+            sensor_active = False
+            chat_states[chat_id] = STATE_IDLE
+            bot.sendMessage(chat_id, 'Alert cancelled. Sensor protection stopped.')
+        else:
+            keyboard = create_keyboard(['Safe'])
+            bot.sendMessage(chat_id, 'Break-in alert is still active! Tap "Safe" if the situation is under control.', reply_markup=keyboard)
+    elif current_state == STATE_IDLE:
+        if command == '/start_protect':
+            if calibrated_voltage is None:
+                bot.sendMessage(chat_id, 'Please set up the sensor first using /setup_sensor.')
+            else:
+                sensor_active = True
+                bot.sendMessage(chat_id, 'Protection started.')
+        elif command == '/end_protect':
+            sensor_active = False
+            bot.sendMessage(chat_id, 'Protection ended.')
+        elif command == '/setup_sensor':
+            chat_states[chat_id] = STATE_SETUP_INSTALLATION
+            keyboard = create_keyboard(['Yes', 'No'])
+            bot.sendMessage(chat_id, 'Have you installed the sensor at the desired location?', reply_markup=keyboard)
+
+    elif current_state == STATE_SETUP_INSTALLATION:
+        if command == 'Yes':
+            chat_states[chat_id] = STATE_SETUP_CALIBRATION
+            keyboard = create_keyboard(['Ready'])
+            bot.sendMessage(chat_id, 'Please close the door/window, then tap "Ready" to start calibration.', reply_markup=keyboard)
+        else:
+            keyboard = create_keyboard(['Yes'])
+            bot.sendMessage(chat_id, 'Please install the sensor at the desired location and tap "Yes" when done.', reply_markup=keyboard)
+
+    elif current_state == STATE_SETUP_CALIBRATION:
+        if command == 'Ready':
+            calibrate_sensor(chat_id)
+        else:
+            keyboard = create_keyboard(['Ready'])
+            bot.sendMessage(chat_id, 'Please close the door/window, then tap "Ready" to start calibration.', reply_markup=keyboard)
+
+    elif current_state == STATE_CHECK_BLACK_SURFACE:
+        if command == 'Yes':
+            keyboard = create_keyboard(['Done'])
+            bot.sendMessage(chat_id, 'Please place a reflective surface or any non-black material opposite to the sensor. This could be a small piece of white tape, aluminum foil, or any light-colored material. Tap "Done" when finished.', reply_markup=keyboard)
+            chat_states[chat_id] = STATE_SETUP_CALIBRATION
+        else:
+            bot.sendMessage(chat_id, 'The sensor is not detecting a closed door/window. Please check the installation and try the setup again using /setup_sensor.')
+            chat_states[chat_id] = STATE_IDLE
 
 def main():
     MessageLoop(bot, {'chat': on_chat_message, 'callback_query': on_callback_query}).run_as_thread()
