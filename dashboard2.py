@@ -55,13 +55,18 @@ try:
         State = 0 if Voltage < 1.0 else 1  # Adjust the threshold as needed
         return Voltage, State
 
+    # Initialize previous values
+    prev_Voltage, prev_State = read_sensor_data()
+
     try:
         while True:
             Voltage, State = read_sensor_data()
-            msg_txt = template % (Voltage, State)
-            message = Message(msg_txt)
-            print(f"Sending message: {message}")
-            device_client.send_message(message)
+            if Voltage != prev_Voltage or State != prev_State:
+                msg_txt = template % (Voltage, State)
+                message = Message(msg_txt)
+                print(f"Sending message: {message}")
+                device_client.send_message(message)
+                prev_Voltage, prev_State = Voltage, State
             time.sleep(1)
     except KeyboardInterrupt:
         print("Exiting...")
