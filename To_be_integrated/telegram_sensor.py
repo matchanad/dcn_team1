@@ -202,14 +202,15 @@ def monitor_sensor():
 def send_alert():
     global alert_active
 
-    if alert_active:
+    while alert_active:
         try:
             keyboard = create_keyboard(['Safe'])
             bot.sendMessage(current_chat_id, 'Alert! Break in detected! Tap "Safe" if the situation is under control.', reply_markup=keyboard)
         except telepot.exception.TelegramError as e:
             print(f"Error sending alert: {e}")
+        time.sleep(2)  # Wait for 2 seconds before sending the next alert
 
-if __name__ == '__main__':
+def main():
     MessageLoop(bot, {'chat': on_chat_message, 'callback_query': on_callback_query}).run_as_thread()
 
     while True:
@@ -219,3 +220,6 @@ if __name__ == '__main__':
         except Exception as e:
             print(f"Error: {e}")
             time.sleep(10)
+
+if __name__ == '__main__':
+    main()
