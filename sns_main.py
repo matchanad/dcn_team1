@@ -247,12 +247,10 @@ def monitor_sensor():
         else:
             print(f"Secure. Current voltage: {current_voltage:.2f}V")
 
-        if current_voltage != prev_Voltage or State != prev_State:
-            msg_txt = template % (current_voltage, State)
-            message = Message(msg_txt)
-            print(f"Sending message to Azure IoT Central: {message}")
-            device_client.send_message(message)
-            prev_Voltage, prev_State = current_voltage, State
+        msg_txt = template % (current_voltage, State)
+        message = Message(msg_txt)
+        print(f"Sending message to Azure IoT Central: {message}")
+        device_client.send_message(message)
 
 def send_alert():
     global alert_active
@@ -271,7 +269,7 @@ def main():
     while True:
         try:
             monitor_sensor()
-            time.sleep(0.01)
+            time.sleep(0.1)
         except Exception as e:
             print(f"Error: {e}")
             time.sleep(10)
