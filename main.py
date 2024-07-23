@@ -1,8 +1,8 @@
+import asyncio
 import time
 from azure.iot.device import IoTHubDeviceClient, Message, ProvisioningDeviceClient, exceptions
 from telegram import Bot, Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.error import TelegramError
-from threading import Thread, Event
+from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
 import busio
 import digitalio
 import board
@@ -19,15 +19,12 @@ primary_key = "cBkkyw8/SDdwPygExhk8npwAPyHsqO0H7832Xx+XSR0="
 provisioning_host = "global.azure-devices-provisioning.net"
 template = "{\"Voltage\": %.2f, \"State\": \"%d\"}"
 
-# Initialize the bot
-bot = Bot(token=BOT_TOKEN)
-
 # Global variables
-sensor_active = Event()
+sensor_active = asyncio.Event()
 chat_states = {}
 current_chat_id = None
 calibrated_voltage = None
-alert_active = Event()
+alert_active = asyncio.Event()
 
 # States for the state machine
 STATE_IDLE = "idle"
@@ -49,100 +46,89 @@ def create_keyboard(options):
     keyboard = [[InlineKeyboardButton(text, callback_data=text)] for text in options]
     return InlineKeyboardMarkup(keyboard)
 
-def handle(update: Update) -> None:
-    global current_chat_id, calibrated_voltage
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await update.message.reply_text('Welcome! Use /setup_sensor to begin setup.')
 
-    try:
-        if update.callback_query:
-            query = update.callback_query
-            chat_id = query.message.chat_id
-            command = query.data
-            query.answer()
+async def view_dashboard(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await update.message.reply_text('You can view the live sensor data at: http://tcrt5000.azureiotcentral.com')
+
+async def setup_sensor(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    chat_id = update.effective_chat.id
+    chat_states[chat_id] = STATE_SETUP_INSTALLATION
+    keyboard = create_keyboard(['Yes', 'No'])
+    await update.message.reply_text('Have you installed the sensor at the desired location?', reply_markup=keyboard)
+
+async def start_protect(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    global calibrated_voltage
+    if calibrated_voltage is None:
+        await update.message.reply_text('Please set up the sensor first using /setup_sensor.')
+    else:
+        sensor_active.set()
+        await update.message.reply_text('Protection started.')
+
+async def end_protect(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    sensor_active.clear()
+    await update.message.reply_text('Protection ended.')
+
+async def button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+    chat_id = query.message.chat.id
+    command = query.data
+    
+    current_state = chat_states.get(chat_id, STATE_IDLE)
+
+    if current_state == STATE_ALERT:
+        if command.lower() == 'safe':
+            alert_active.clear()
+            sensor_active.clear()
+            chat_states[chat_id] = STATE_IDLE
+            await query.edit_message_text('Alert cancelled. Sensor protection stopped.')
         else:
-            message = update.message
-            chat_id = message.chat_id
-            command = message.text
+            keyboard = create_keyboard(['Safe'])
+            await query.edit_message_text('Break-in alert is still active! Tap "Safe" if the situation is under control.', reply_markup=keyboard)
+    elif current_state == STATE_SETUP_INSTALLATION:
+        if command == 'Yes':
+            chat_states[chat_id] = STATE_SETUP_CALIBRATION
+            keyboard = create_keyboard(['Ready'])
+            await query.edit_message_text('Please close the door/window, then tap "Ready" to start calibration.', reply_markup=keyboard)
+        else:
+            keyboard = create_keyboard(['Yes'])
+            await query.edit_message_text('Please install the sensor at the desired location and tap "Yes" when done.', reply_markup=keyboard)
+    elif current_state == STATE_SETUP_CALIBRATION:
+        if command == 'Ready':
+            await calibrate_sensor(chat_id, query)
+        else:
+            keyboard = create_keyboard(['Ready'])
+            await query.edit_message_text('Please close the door/window, then tap "Ready" to start calibration.', reply_markup=keyboard)
+    elif current_state == STATE_CHECK_BLACK_SURFACE:
+        if command == 'Yes':
+            keyboard = create_keyboard(['Done'])
+            await query.edit_message_text('Please place a reflective surface or any non-black material opposite to the sensor. This could be a small piece of white tape, aluminum foil, or any light-colored material. Tap "Done" when finished.', reply_markup=keyboard)
+            chat_states[chat_id] = STATE_SETUP_CALIBRATION
+        else:
+            await query.edit_message_text('The sensor is not detecting a closed door/window. Please check the installation and try the setup again using /setup_sensor.')
+            chat_states[chat_id] = STATE_IDLE
 
-        current_chat_id = chat_id
-        print(f'Received command: {command}')
-
-        current_state = chat_states.get(chat_id, STATE_IDLE)
-
-        if command == '/view_dashboard':
-            bot.send_message(chat_id=chat_id, text='You can view the live sensor data at: http://tcrt5000.azureiotcentral.com')
-            return
-
-        if current_state == STATE_ALERT:
-            if command.lower() == 'safe':
-                alert_active.clear()
-                sensor_active.clear()
-                chat_states[chat_id] = STATE_IDLE
-                bot.send_message(chat_id=chat_id, text='Alert cancelled. Sensor protection stopped.')
-            else:
-                keyboard = create_keyboard(['Safe'])
-                bot.send_message(chat_id=chat_id, text='Break-in alert is still active! Tap "Safe" if the situation is under control.', reply_markup=keyboard)
-        elif current_state == STATE_IDLE:
-            if command == '/start_protect':
-                if calibrated_voltage is None:
-                    bot.send_message(chat_id=chat_id, text='Please set up the sensor first using /setup_sensor.')
-                else:
-                    sensor_active.set()
-                    bot.send_message(chat_id=chat_id, text='Protection started.')
-            elif command == '/end_protect':
-                sensor_active.clear()
-                bot.send_message(chat_id=chat_id, text='Protection ended.')
-            elif command == '/setup_sensor':
-                chat_states[chat_id] = STATE_SETUP_INSTALLATION
-                keyboard = create_keyboard(['Yes', 'No'])
-                bot.send_message(chat_id=chat_id, text='Have you installed the sensor at the desired location?', reply_markup=keyboard)
-
-        elif current_state == STATE_SETUP_INSTALLATION:
-            if command == 'Yes':
-                chat_states[chat_id] = STATE_SETUP_CALIBRATION
-                keyboard = create_keyboard(['Ready'])
-                bot.send_message(chat_id=chat_id, text='Please close the door/window, then tap "Ready" to start calibration.', reply_markup=keyboard)
-            else:
-                keyboard = create_keyboard(['Yes'])
-                bot.send_message(chat_id=chat_id, text='Please install the sensor at the desired location and tap "Yes" when done.', reply_markup=keyboard)
-
-        elif current_state == STATE_SETUP_CALIBRATION:
-            if command == 'Ready':
-                calibrate_sensor(chat_id)
-            else:
-                keyboard = create_keyboard(['Ready'])
-                bot.send_message(chat_id=chat_id, text='Please close the door/window, then tap "Ready" to start calibration.', reply_markup=keyboard)
-
-        elif current_state == STATE_CHECK_BLACK_SURFACE:
-            if command == 'Yes':
-                keyboard = create_keyboard(['Done'])
-                bot.send_message(chat_id=chat_id, text='Please place a reflective surface or any non-black material opposite to the sensor. This could be a small piece of white tape, aluminum foil, or any light-colored material. Tap "Done" when finished.', reply_markup=keyboard)
-                chat_states[chat_id] = STATE_SETUP_CALIBRATION
-            else:
-                bot.send_message(chat_id=chat_id, text='The sensor is not detecting a closed door/window. Please check the installation and try the setup again using /setup_sensor.')
-                chat_states[chat_id] = STATE_IDLE
-
-    except TelegramError as e:
-        print(f"TelegramError: {e}")
-
-def calibrate_sensor(chat_id):
+async def calibrate_sensor(chat_id, query):
     global calibrated_voltage
 
-    bot.send_message(chat_id=chat_id, text='Starting calibration. Please ensure the door/window is closed.')
+    await query.edit_message_text('Starting calibration. Please ensure the door/window is closed.')
     
     for _ in range(5):  # Try 5 times
         voltage = chan.voltage
         if voltage < 1.0:  # Voltage less than 1.0V means closed
             calibrated_voltage = voltage
-            bot.send_message(chat_id=chat_id, text=f'Calibration complete. The sensor is working correctly. Calibrated voltage: {calibrated_voltage:.2f}V')
+            await query.edit_message_text(f'Calibration complete. The sensor is working correctly. Calibrated voltage: {calibrated_voltage:.2f}V')
             chat_states[chat_id] = STATE_IDLE
             return
-        time.sleep(1)
+        await asyncio.sleep(1)
     
     keyboard = create_keyboard(['Yes', 'No'])
-    bot.send_message(chat_id=chat_id, text='The sensor is not detecting a closed door/window. Is the door/window surface black or very dark?', reply_markup=keyboard)
+    await query.edit_message_text('The sensor is not detecting a closed door/window. Is the door/window surface black or very dark?', reply_markup=keyboard)
     chat_states[chat_id] = STATE_CHECK_BLACK_SURFACE
 
-def monitor_sensor():
+async def monitor_sensor():
     global current_chat_id, calibrated_voltage, device_client
 
     prev_voltage = None
@@ -158,7 +144,7 @@ def monitor_sensor():
                 msg_txt = template % (current_voltage, current_state)
                 message = Message(msg_txt)
                 print(f"Sending message to Azure IoT Central: {message}")
-                device_client.send_message(message)
+                await asyncio.to_thread(device_client.send_message, message)
                 prev_voltage, prev_state = current_voltage, current_state
 
             if current_voltage >= 1.0 and not alert_active.is_set():  # Break-in detected if voltage is 1.0V or more
@@ -166,84 +152,67 @@ def monitor_sensor():
                 if current_chat_id is not None:
                     alert_active.set()
                     chat_states[current_chat_id] = STATE_ALERT
-                    send_alert()
+                    asyncio.create_task(send_alert())
             else:
                 print(f"Secure. Current voltage: {current_voltage:.2f}V")
-        time.sleep(0.01)
+        await asyncio.sleep(0.01)
 
-def send_alert():
+async def send_alert():
     while alert_active.is_set():
         try:
             keyboard = create_keyboard(['Safe'])
-            bot.send_message(chat_id=current_chat_id, text='Alert! Break in detected! Tap "Safe" if the situation is under control.', reply_markup=keyboard)
-        except TelegramError as e:
+            await bot.send_message(chat_id=current_chat_id, text='Alert! Break in detected! Tap "Safe" if the situation is under control.', reply_markup=keyboard)
+        except Exception as e:
             print(f"Error sending alert: {e}")
-        time.sleep(2)  # Wait for 2 seconds before sending the next alert
+        await asyncio.sleep(2)  # Wait for 2 seconds before sending the next alert
 
-def main():
-    global device_client
+async def main():
+    global device_client, bot
 
-    try:
-        # Provisioning
-        provisioning_device_client = ProvisioningDeviceClient.create_from_symmetric_key(
-            provisioning_host=provisioning_host,
-            registration_id=device_id,
-            id_scope=id_scope,
-            symmetric_key=primary_key
+    # Provisioning
+    provisioning_device_client = ProvisioningDeviceClient.create_from_symmetric_key(
+        provisioning_host=provisioning_host,
+        registration_id=device_id,
+        id_scope=id_scope,
+        symmetric_key=primary_key
+    )
+
+    registration_result = await asyncio.to_thread(provisioning_device_client.register)
+
+    if registration_result.status == "assigned":
+        print("Device successfully provisioned")
+        device_client = IoTHubDeviceClient.create_from_symmetric_key(
+            symmetric_key=primary_key,
+            hostname=registration_result.registration_state.assigned_hub,
+            device_id=device_id
         )
+        await asyncio.to_thread(device_client.connect)
+    else:
+        print(f"Provisioning failed with status: {registration_result.status}")
+        raise RuntimeError("Could not provision device. Aborting.")
 
-        registration_result = provisioning_device_client.register()
+    application = Application.builder().token(BOT_TOKEN).build()
 
-        if registration_result.status == "assigned":
-            print("Device successfully provisioned")
-            device_client = IoTHubDeviceClient.create_from_symmetric_key(
-                symmetric_key=primary_key,
-                hostname=registration_result.registration_state.assigned_hub,
-                device_id=device_id
-            )
-            device_client.connect()
-        else:
-            print(f"Provisioning failed with status: {registration_result.status}")
-            raise RuntimeError("Could not provision device. Aborting.")
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("view_dashboard", view_dashboard))
+    application.add_handler(CommandHandler("setup_sensor", setup_sensor))
+    application.add_handler(CommandHandler("start_protect", start_protect))
+    application.add_handler(CommandHandler("end_protect", end_protect))
+    application.add_handler(CallbackQueryHandler(button))
 
-        sensor_thread = Thread(target=monitor_sensor)
-        sensor_thread.daemon = True
-        sensor_thread.start()
+    bot = application.bot
 
-        alert_thread = Thread(target=send_alert)
-        alert_thread.daemon = True
-        alert_thread.start()
+    # Start the sensor monitoring task
+    asyncio.create_task(monitor_sensor())
 
-        offset = None
+    # Start the bot
+    await application.run_polling(allowed_updates=Update.ALL_TYPES)
 
-        while True:
-            try:
-                updates = bot.get_updates(offset=offset, timeout=10)
-
-                for update in updates:
-                    offset = update.update_id + 1
-                    handle(update)
-
-            except TelegramError as e:
-                print(f"TelegramError: {e}")
-                time.sleep(10)
-            except Exception as e:
-                print(f"Error: {e}")
-                time.sleep(10)
-
-    except exceptions.CredentialError as e:
-        print(f"Credential error: {e}")
-    except exceptions.ConnectionFailedError as e:
-        print(f"Connection failed error: {e}")
-    except exceptions.ConnectionDroppedError as e:
-        print(f"Connection dropped error: {e}")
-    except exceptions.ClientError as e:
-        print(f"Client error: {e}")
+if __name__ == '__main__':
+    try:
+        asyncio.run(main())
     except Exception as e:
         print(f"An unexpected error occurred: {e}")
     finally:
         if device_client:
-            device_client.disconnect()
-
-if __name__ == '__main__':
-    main()
+            asyncio.run(asyncio.to_thread(device_client.disconnect))
