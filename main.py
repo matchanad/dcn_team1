@@ -169,50 +169,66 @@ async def send_alert():
 async def main():
     global device_client, bot
 
-    # Provisioning
-    provisioning_device_client = ProvisioningDeviceClient.create_from_symmetric_key(
-        provisioning_host=provisioning_host,
-        registration_id=device_id,
-        id_scope=id_scope,
-        symmetric_key=primary_key
-    )
-
-    registration_result = await asyncio.to_thread(provisioning_device_client.register)
-
-    if registration_result.status == "assigned":
-        print("Device successfully provisioned")
-        device_client = IoTHubDeviceClient.create_from_symmetric_key(
-            symmetric_key=primary_key,
-            hostname=registration_result.registration_state.assigned_hub,
-            device_id=device_id
+    try:
+        # Provisioning
+        provisioning_device_client = ProvisioningDeviceClient.create_from_symmetric_key(
+            provisioning_host=provisioning_host,
+            registration_id=device_id,
+            id_scope=id_scope,
+            symmetric_key=primary_key
         )
-        await asyncio.to_thread(device_client.connect)
-    else:
-        print(f"Provisioning failed with status: {registration_result.status}")
-        raise RuntimeError("Could not provision device. Aborting.")
 
-    application = Application.builder().token(BOT_TOKEN).build()
+        registration_result = await asyncio.to_thread(provisioning_device_client.register)
 
-    application.add_handler(CommandHandler("start", start))
-    application.add_handler(CommandHandler("view_dashboard", view_dashboard))
-    application.add_handler(CommandHandler("setup_sensor", setup_sensor))
-    application.add_handler(CommandHandler("start_protect", start_protect))
-    application.add_handler(CommandHandler("end_protect", end_protect))
-    application.add_handler(CallbackQueryHandler(button))
+        if registration_result.status == "assigned":
+            print("Device successfully provisioned")
+            device_client = IoTHubDeviceClient.create_from_symmetric_key(
+                symmetric_key=primary_key,
+                hostname=registration_result.registration_state.assigned_hub,
+                device_id=device_id
+            )
+            await asyncio.to_thread(device_client.connect)
+        else:
+            print(f"Provisioning failed with status: {registration_result.status}")
+            raise RuntimeError("Could not provision device. Aborting.")
 
-    bot = application.bot
+        application = Application.builder().token(BOT_TOKEN).build()
 
-    # Start the sensor monitoring task
-    asyncio.create_task(monitor_sensor())
+        application.add_handler(CommandHandler("start", start))
+        application.add_handler(CommandHandler("view_dashboard", view_dashboard))
+        application.add_handler(CommandHandler("setup_sensor", setup_sensor))
+        application.add_handler(CommandHandler("start_protect", start_protect))
+        application.add_handler(CommandHandler("end_protect", end_protect))
+        application.add_handler(CallbackQueryHandler(button))
 
-    # Start the bot
-    await application.run_polling(allowed_updates=Update.ALL_TYPES)
+        bot = application.bot
+
+        # Start the sensor monitoring task
+        sensor_task = asyncio.create_task(monitor_sensor())
+
+        # Start the bot
+        await application.initialize()
+        await application.start()
+        await application.updater.start_polling()
+
+        # Run the bot until the user presses Ctrl-C
+        await application.updater.idle()
+
+    except Exception as e:
+        print(f"An error occurred: {e}")
+    finally:
+        # Proper cleanup
+        if 'application' in locals():
+            await application.stop()
+            await application.shutdown()
+        if device_client:
+            await asyncio.to_thread(device_client.disconnect)
+        if 'sensor_task' in locals():
+            sensor_task.cancel()
+            try:
+                await sensor_task
+            except asyncio.CancelledError:
+                pass
 
 if __name__ == '__main__':
-    try:
-        asyncio.run(main())
-    except Exception as e:
-        print(f"An unexpected error occurred: {e}")
-    finally:
-        if device_client:
-            asyncio.run(asyncio.to_thread(device_client.disconnect))
+    asyncio.run(main())
