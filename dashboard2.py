@@ -12,7 +12,7 @@ device_id = "27yzuc90d6v"
 primary_key = "cBkkyw8/SDdwPygExhk8npwAPyHsqO0H7832Xx+XSR0="
 
 provisioning_host = "global.azure-devices-provisioning.net"
-template = "{\"Voltage\": %.2f, \"State\": \"%s\"}"
+template = "{\"Voltage\": %.2f, \"State\": \"%d\"}"
 
 try:
     # Provisioning
@@ -49,14 +49,10 @@ try:
     # Create an analog input channel on pin 0
     chan = AnalogIn(mcp, MCP.P0)
 
-    # Initialize the digital input pin (e.g., D6)
-    digital_pin = digitalio.DigitalInOut(board.D6)
-    digital_pin.direction = digitalio.Direction.INPUT
-
     # Function to read sensor data
     def read_sensor_data():
         Voltage = chan.voltage
-        State = "0" if digital_pin.value = 0 else "1"
+        State = 0 if Voltage < 1.0 else 1  # Adjust the threshold as needed
         return Voltage, State
 
     try:
